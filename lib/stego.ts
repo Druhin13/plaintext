@@ -1,4 +1,4 @@
-const CURRENT_ALPHABET = ["\u200C", "\u200D", "\u2060", "\u2063"] as const;
+const CURRENT_ALPHABET = ["\u200D", "\u200C", "\u2060", "\u2063"] as const;
 const LEGACY_ALPHABET = ["\u200B", "\u200C", "\u2060", "\u2063"] as const;
 const ALL_ALPHABET_SET = new Set<string>([...CURRENT_ALPHABET, ...LEGACY_ALPHABET]);
 
@@ -47,7 +47,7 @@ function decodeWithAlphabet(text: string, alphabet: readonly string[]) {
 
 export function invisibleToBytes(text: string) {
   const characters = Array.from(text);
-  const hasCurrentMarker = characters.includes(CURRENT_ALPHABET[1]);
+  const hasCurrentMarker = characters.includes(CURRENT_ALPHABET[0]);
   const hasLegacyMarker = characters.includes(LEGACY_ALPHABET[0]);
 
   if (hasLegacyMarker && !hasCurrentMarker) {
