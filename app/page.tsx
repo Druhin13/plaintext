@@ -56,7 +56,7 @@ export default function Home() {
       }
       if (message?.type === "generated") {
         const pending = pendingRef.current;
-        if (pending?.id === message.requestId) {
+        if (pending && pending.id === message.requestId) {
           pendingRef.current = null;
           pending.resolve(message.text ?? "");
         }
