@@ -54,16 +54,18 @@ export default function Home() {
       if (message?.type === "progress") {
         setModelProgress(message.progress ?? 0);
       }
-      if (message?.type === "generated" && pendingRef.current?.id === message.requestId) {
+      if (message?.type === "generated") {
         const pending = pendingRef.current;
-        pendingRef.current = null;
-        pending.resolve(message.text ?? "");
+        if (pending?.id === message.requestId) {
+          pendingRef.current = null;
+          pending.resolve(message.text ?? "");
+        }
       }
       if (message?.type === "error") {
         setModelState("error");
         setModelMessage("Local model unavailable");
-        if (pendingRef.current && (!message.requestId || pendingRef.current.id === message.requestId)) {
-          const pending = pendingRef.current;
+        const pending = pendingRef.current;
+        if (pending && (!message.requestId || pending.id === message.requestId)) {
           pendingRef.current = null;
           pending.reject(new Error(message.message || "Local model unavailable."));
         }
