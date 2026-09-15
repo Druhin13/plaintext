@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildCoverPrompt, cleanGeneratedCover, createFallbackCover, type CoverStyle } from "@/lib/cover";
 import { createPacket, parsePacket, revealPacket } from "@/lib/packet";
@@ -215,126 +216,131 @@ export default function Home() {
   }
 
   return (
-    <main className="shell">
-      <header className="topbar">
+    <main className="app-shell">
+      <header className="app-nav">
         <a className="brand" href="#" aria-label="plaintext home">
-          <span className="brand-mark">p_</span>
+          <span className="brand-prompt">$</span>
           <span>plaintext</span>
+          <span className="brand-cursor">_</span>
         </a>
-        <div className="privacy-pill"><span className="status-dot" /> local only</div>
+        <div className="nav-actions">
+          <div className="model-status" title={modelMessage}>
+            <span className={`status-dot ${modelState === "error" ? "muted" : ""}`} />
+            <span>{modelState === "generating" ? "working" : modelState}</span>
+          </div>
+          <Link className="learn-link" href="/learn">learn more ↗</Link>
+        </div>
       </header>
 
-      <section className="hero">
-        <p className="eyebrow">steganography for ordinary text</p>
-        <h1>Say one thing.<br /><span>Mean another.</span></h1>
-        <p className="intro">Hide a secret inside a completely ordinary sentence. No account, no server, no trace. Everything happens in your browser.</p>
-      </section>
-
-      <section className="workspace">
-        <div className="mode-switch" role="tablist" aria-label="plaintext mode">
-          <button className={mode === "hide" ? "active" : ""} onClick={() => switchMode("hide")} type="button">Hide</button>
-          <button className={mode === "reveal" ? "active" : ""} onClick={() => switchMode("reveal")} type="button">Reveal</button>
+      <section className="terminal" aria-label="plaintext terminal">
+        <div className="terminal-bar">
+          <div className="terminal-dots" aria-hidden="true"><span /><span /><span /></div>
+          <span className="terminal-title">plaintext.local</span>
+          <div className="mode-switch" role="tablist" aria-label="plaintext mode">
+            <button className={mode === "hide" ? "active" : ""} onClick={() => switchMode("hide")} type="button" role="tab" aria-selected={mode === "hide"}>hide</button>
+            <button className={mode === "reveal" ? "active" : ""} onClick={() => switchMode("reveal")} type="button" role="tab" aria-selected={mode === "reveal"}>reveal</button>
+          </div>
         </div>
 
+        {(modelState === "loading" || modelState === "generating") && (
+          <div className="progress-track" aria-label={modelMessage}>
+            <span style={{ width: `${modelProgress || 8}%` }} />
+          </div>
+        )}
+
         {mode === "hide" ? (
-          <div className="panel-grid">
-            <div className="panel input-panel">
-              <div className="panel-heading">
-                <span>01 / secret</span>
-                <span>{secret.length} chars</span>
-              </div>
-              <textarea value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Type something you don't want to say out loud…" spellCheck={false} />
-              <div className="field-row">
-                <label>
-                  <span>Password <em>optional</em></span>
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Encrypt before hiding" autoComplete="new-password" />
-                </label>
-                <label>
-                  <span>Cover style</span>
-                  <select value={coverStyle} onChange={(event) => setCoverStyle(event.target.value as CoverStyle)}>
-                    <option value="auto">Auto</option>
-                    <option value="casual">Casual</option>
-                    <option value="work">Work</option>
-                    <option value="friendly">Friendly</option>
-                    <option value="story">Story</option>
-                    <option value="random">Random</option>
-                  </select>
-                </label>
-              </div>
-              <button className="primary-button" type="button" onClick={handleHide} disabled={busy || !secret.trim()}>
-                <span>{busy ? "Working…" : "Hide in plain sight"}</span>
-                <span>↗</span>
-              </button>
+          <div className="terminal-body">
+            <div className="command-line"><span className="prompt">$</span><span>plaintext hide</span></div>
+
+            <label className="terminal-field" htmlFor="secret-input">
+              <span className="field-label">secret</span>
+              <textarea id="secret-input" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="type your secret…" spellCheck={false} />
+              <span className="field-meta">{secret.length} chars</span>
+            </label>
+
+            <div className="option-row">
+              <label>
+                <span>password <em>optional</em></span>
+                <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="none" autoComplete="new-password" />
+              </label>
+              <label>
+                <span>cover</span>
+                <select value={coverStyle} onChange={(event) => setCoverStyle(event.target.value as CoverStyle)}>
+                  <option value="auto">auto</option>
+                  <option value="casual">casual</option>
+                  <option value="work">work</option>
+                  <option value="friendly">friendly</option>
+                  <option value="story">story</option>
+                  <option value="random">random</option>
+                </select>
+              </label>
             </div>
 
-            <div className={`panel output-panel ${output ? "has-output" : ""}`}>
-              <div className="panel-heading">
-                <span>02 / plaintext</span>
-                {output ? <span>{hiddenCount} invisible chars</span> : <span>waiting</span>}
+            <button className="run-button" type="button" onClick={handleHide} disabled={busy || !secret.trim()}>
+              <span>{busy ? "running…" : "run hide"}</span>
+              <span>↵</span>
+            </button>
+
+            {notice && <div className="notice" role="status"><span>!</span>{notice}</div>}
+
+            <div className={`terminal-output ${output ? "has-output" : ""}`}>
+              <div className="output-heading">
+                <span>stdout</span>
+                <span>{output ? `${hiddenCount} hidden chars` : "waiting"}</span>
               </div>
               {output ? (
                 <>
                   <div className="output-copy">{output}</div>
                   <div className="output-actions">
-                    <button type="button" onClick={copyOutput}>{copied ? "Copied" : "Copy message"}</button>
-                    <button type="button" onClick={handleHide} disabled={busy}>Regenerate</button>
+                    <button type="button" onClick={copyOutput}>{copied ? "copied ✓" : "copy"}</button>
+                    <button type="button" onClick={handleHide} disabled={busy}>regenerate</button>
                   </div>
                 </>
               ) : (
-                <div className="empty-output">
-                  <div className="cursor-box">_</div>
-                  <p>Your innocent-looking message will appear here.</p>
-                </div>
+                <div className="output-empty"><span className="blink">_</span></div>
               )}
             </div>
           </div>
         ) : (
-          <div className="panel-grid reveal-grid">
-            <div className="panel input-panel">
-              <div className="panel-heading"><span>01 / paste</span><span>{countHiddenCharacters(revealInput)} hidden chars</span></div>
-              <textarea value={revealInput} onChange={(event) => setRevealInput(event.target.value)} placeholder="Paste a plaintext message here…" spellCheck={false} />
-              {(needsPassword || revealPassword) && (
-                <label className="single-field">
-                  <span>Password</span>
-                  <input type="password" value={revealPassword} onChange={(event) => setRevealPassword(event.target.value)} placeholder="Enter password" autoComplete="current-password" />
-                </label>
-              )}
-              <button className="primary-button" type="button" onClick={handleReveal} disabled={busy || !revealInput.trim()}>
-                <span>{busy ? "Inspecting…" : "Reveal message"}</span>
-                <span>↘</span>
-              </button>
-            </div>
+          <div className="terminal-body">
+            <div className="command-line"><span className="prompt">$</span><span>plaintext reveal</span></div>
 
-            <div className={`panel output-panel ${revealedSecret ? "has-output" : ""}`}>
-              <div className="panel-heading"><span>02 / secret</span><span>{revealedSecret ? "found" : "waiting"}</span></div>
+            <label className="terminal-field" htmlFor="reveal-input">
+              <span className="field-label">plaintext</span>
+              <textarea id="reveal-input" value={revealInput} onChange={(event) => setRevealInput(event.target.value)} placeholder="paste a message…" spellCheck={false} />
+              <span className="field-meta">{countHiddenCharacters(revealInput)} hidden chars</span>
+            </label>
+
+            {(needsPassword || revealPassword) && (
+              <label className="password-row">
+                <span>password</span>
+                <input type="password" value={revealPassword} onChange={(event) => setRevealPassword(event.target.value)} placeholder="enter password" autoComplete="current-password" />
+              </label>
+            )}
+
+            <button className="run-button" type="button" onClick={handleReveal} disabled={busy || !revealInput.trim()}>
+              <span>{busy ? "running…" : "run reveal"}</span>
+              <span>↵</span>
+            </button>
+
+            {notice && <div className="notice" role="status"><span>!</span>{notice}</div>}
+
+            <div className={`terminal-output ${revealedSecret ? "has-output" : ""}`}>
+              <div className="output-heading"><span>stdout</span><span>{revealedSecret ? "secret found" : "waiting"}</span></div>
               {revealedSecret ? (
-                <div className="secret-result"><span>decrypted output</span><p>{revealedSecret}</p></div>
+                <div className="secret-result">{revealedSecret}</div>
               ) : (
-                <div className="empty-output"><div className="cursor-box">_</div><p>Any hidden message will be revealed here.</p></div>
+                <div className="output-empty"><span className="blink">_</span></div>
               )}
             </div>
           </div>
         )}
 
-        {notice && <div className="notice" role="status">{notice}</div>}
-      </section>
-
-      <section className="system-strip">
-        <div><span className={`status-dot ${modelState === "error" ? "muted" : ""}`} /><strong>{modelMessage}</strong></div>
-        {(modelState === "loading" || modelState === "generating") && <div className="progress-track"><span style={{ width: `${modelProgress || 8}%` }} /></div>}
-        <p>{modelState === "idle" ? "The ~350M local model starts loading in the background and is cached by your browser." : "Cover text is generated locally. Your secret is never included in the AI prompt."}</p>
-      </section>
-
-      <section className="how-it-works">
-        <div className="section-label">how it works</div>
-        <div className="steps">
-          <article><span>01</span><h2>Write</h2><p>Enter any secret. Add a password if you want AES-256-GCM encryption.</p></article>
-          <article><span>02</span><h2>Disguise</h2><p>A tiny local model writes natural cover text. Your payload is encoded with invisible Unicode.</p></article>
-          <article><span>03</span><h2>Reveal</h2><p>Paste the untouched message back here. plaintext extracts and decrypts what nobody else can see.</p></article>
+        <div className="terminal-statusbar">
+          <span>{modelMessage}</span>
+          <span>local / browser</span>
         </div>
       </section>
-
-      <footer><span>plaintext / experimental</span><span>browser-only · open source</span></footer>
     </main>
   );
 }
