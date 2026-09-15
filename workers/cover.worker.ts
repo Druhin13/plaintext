@@ -28,6 +28,28 @@ async function getGenerator() {
   return generator;
 }
 
+function extractGeneratedText(result: any) {
+  const first = Array.isArray(result) ? result[0] : result;
+  const generated = first?.generated_text;
+
+  if (typeof generated === "string") {
+    return generated;
+  }
+
+  if (Array.isArray(generated)) {
+    const assistant = [...generated].reverse().find((message) => message?.role === "assistant");
+    if (typeof assistant?.content === "string") {
+      return assistant.content;
+    }
+    const last = generated[generated.length - 1];
+    if (typeof last?.content === "string") {
+      return last.content;
+    }
+  }
+
+  return "";
+}
+
 self.onmessage = async (event: MessageEvent) => {
   const message = event.data;
 
@@ -51,21 +73,21 @@ self.onmessage = async (event: MessageEvent) => {
   try {
     const generator = await getGenerator();
     post("status", { status: "generating", message: "Writing cover sentence…" });
-    const result = await generator(message.prompt, {
-      max_new_tokens: 64,
-      do_sample: true,
-      temperature: 0.92,
-      top_p: 0.92,
-      top_k: 50,
-      repetition_penalty: 1.08,
-      return_full_text: false,
-    });
+    const result = await generator(
+      [{ role: "user", content: message.prompt }],
+      {
+        max_new_tokens: 64,
+        do_sample: true,
+        temperature: 0.92,
+        top_p: 0.92,
+        top_k: 50,
+        repetition_penalty: 1.08,
+      },
+    );
 
-    const first = Array.isArray(result) ? result[0] : result;
-    const generated = typeof first?.generated_text === "string" ? first.generated_text : "";
     post("generated", {
       requestId: message.requestId,
-      text: generated,
+      text: extractGeneratedText(result),
     });
     post("status", { status: "ready", message: "Local model ready" });
   } catch (error) {
