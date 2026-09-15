@@ -85,11 +85,34 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (!("gpu" in navigator)) {
+      setModelState("error");
+      setModelMessage("WebGPU unavailable · using fallback");
+      return;
+    }
+
+    const worker = getWorker();
+    worker.postMessage({ type: "load" });
+
     return () => {
       workerRef.current?.terminate();
       workerRef.current = null;
     };
-  }, []);
+  }, [getWorker]);
+
+  useEffect(() => {
+    if (modelState !== "ready" || !("gpu" in navigator)) {
+      return;
+    }
+
+    const worker = getWorker();
+    worker.postMessage({
+      type: "prime",
+      cacheKey: coverStyle,
+      prompt: buildCoverPrompt(coverStyle),
+      target: 2,
+    });
+  }, [coverStyle, getWorker, modelState]);
 
   const generateCover = useCallback(async () => {
     if (!("gpu" in navigator)) {
@@ -104,7 +127,12 @@ export default function Home() {
       const prompt = buildCoverPrompt(coverStyle);
       const generated = await new Promise<string>((resolve, reject) => {
         pendingRef.current = { id: requestId, resolve, reject };
-        worker.postMessage({ type: "generate", requestId, prompt });
+        worker.postMessage({
+          type: "generate",
+          requestId,
+          prompt,
+          cacheKey: coverStyle,
+        });
       });
       const cleaned = cleanGeneratedCover(generated);
       if (cleaned.length < 20) {
@@ -294,7 +322,7 @@ export default function Home() {
       <section className="system-strip">
         <div><span className={`status-dot ${modelState === "error" ? "muted" : ""}`} /><strong>{modelMessage}</strong></div>
         {(modelState === "loading" || modelState === "generating") && <div className="progress-track"><span style={{ width: `${modelProgress || 8}%` }} /></div>}
-        <p>{modelState === "idle" ? "The ~350M local model downloads on first use and is cached by your browser." : "Cover text is generated locally. Your secret is never included in the AI prompt."}</p>
+        <p>{modelState === "idle" ? "The ~350M local model starts loading in the background and is cached by your browser." : "Cover text is generated locally. Your secret is never included in the AI prompt."}</p>
       </section>
 
       <section className="how-it-works">
