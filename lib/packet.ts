@@ -24,6 +24,12 @@ function concatBytes(...parts: Uint8Array[]) {
   return output;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function writeUint32(value: number) {
   const bytes = new Uint8Array(4);
   new DataView(bytes.buffer).setUint32(0, value, false);
@@ -38,7 +44,7 @@ async function deriveKey(password: string, salt: Uint8Array) {
   const encoder = new TextEncoder();
   const material = await crypto.subtle.importKey(
     "raw",
-    encoder.encode(password),
+    toArrayBuffer(encoder.encode(password)),
     "PBKDF2",
     false,
     ["deriveKey"],
@@ -48,7 +54,7 @@ async function deriveKey(password: string, salt: Uint8Array) {
     {
       name: "PBKDF2",
       hash: "SHA-256",
-      salt,
+      salt: toArrayBuffer(salt),
       iterations: PBKDF2_ITERATIONS,
     },
     material,
@@ -75,10 +81,10 @@ export async function createPacket(secret: string, password?: string) {
     const ciphertext = await crypto.subtle.encrypt(
       {
         name: "AES-GCM",
-        iv,
+        iv: toArrayBuffer(iv),
       },
       key,
-      plaintext,
+      toArrayBuffer(plaintext),
     );
     payload = new Uint8Array(ciphertext);
   }
@@ -152,10 +158,10 @@ export async function revealPacket(packet: ParsedPacket, password?: string) {
     const plaintext = await crypto.subtle.decrypt(
       {
         name: "AES-GCM",
-        iv: packet.iv,
+        iv: toArrayBuffer(packet.iv),
       },
       key,
-      packet.payload,
+      toArrayBuffer(packet.payload),
     );
     return new TextDecoder().decode(plaintext);
   } catch {
