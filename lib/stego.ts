@@ -26,7 +26,11 @@ export function invisibleToBytes(text: string) {
 
   const completeLength = symbols.length - (symbols.length % 4);
   const bytes = new Uint8Array(completeLength / 4);
-  const lookup = new Map(ALPHABET.map((character, index) => [character, index]));
+  const lookup = new Map<string, number>();
+
+  ALPHABET.forEach((character, index) => {
+    lookup.set(character, index);
+  });
 
   for (let index = 0; index < completeLength; index += 4) {
     bytes[index / 4] =
