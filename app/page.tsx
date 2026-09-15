@@ -72,9 +72,10 @@ export default function Home() {
     worker.onerror = () => {
       setModelState("error");
       setModelMessage("Local model unavailable");
-      if (pendingRef.current) {
-        pendingRef.current.reject(new Error("Local model worker failed."));
-        pendingRef.current = null;
+      const pending = pendingRef.current;
+      pendingRef.current = null;
+      if (pending) {
+        pending.reject(new Error("Local model worker failed."));
       }
     };
     workerRef.current = worker;
