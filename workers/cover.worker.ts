@@ -65,7 +65,7 @@ function pick<T>(items: readonly T[]) {
 
 async function getGenerator() {
   if (!generatorPromise) {
-    post("status", { status: "loading", message: "Loading local model in background…" });
+    post("status", { status: "loading", message: "Loading local AI in your browser…" });
     hasTotalProgress = false;
     generatorPromise = pipeline("text-generation", MODEL_ID, {
       device: "webgpu",
@@ -91,7 +91,7 @@ async function getGenerator() {
   try {
     const generator = await generatorPromise;
     post("progress", { progress: 100 });
-    post("status", { status: "ready", message: "Local model ready" });
+    post("status", { status: "ready", message: "Local AI ready" });
     return generator;
   } catch (error) {
     generatorPromise = null;
@@ -235,7 +235,7 @@ async function generateUniqueText(prompt: string, announce: boolean) {
   const generator = await getGenerator();
 
   if (announce) {
-    post("status", { status: "generating", message: "Writing cover sentence…" });
+    post("status", { status: "generating", message: "Writing visible text…" });
   }
 
   let bestCandidate = "";
@@ -279,10 +279,10 @@ async function generateUniqueText(prompt: string, announce: boolean) {
       return bestCandidate;
     }
 
-    throw new Error("The local model could not produce a fresh cover sentence.");
+    throw new Error("The local AI could not produce fresh visible text.");
   } finally {
     if (announce) {
-      post("status", { status: "ready", message: "Local model ready" });
+      post("status", { status: "ready", message: "Local AI ready" });
     }
   }
 }
@@ -388,7 +388,7 @@ self.onmessage = async (event: MessageEvent) => {
     } catch (error) {
       post("error", {
         requestId: message.requestId,
-        message: error instanceof Error ? error.message : "Unable to load local model.",
+        message: error instanceof Error ? error.message : "Unable to load the local AI.",
       });
     }
     return;
@@ -430,7 +430,7 @@ self.onmessage = async (event: MessageEvent) => {
   } catch (error) {
     post("error", {
       requestId: message.requestId,
-      message: error instanceof Error ? error.message : "Unable to generate a cover sentence.",
+      message: error instanceof Error ? error.message : "Unable to generate visible text.",
     });
   }
 };
