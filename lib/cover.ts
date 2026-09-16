@@ -1,4 +1,5 @@
 export type CoverStyle = "auto" | "casual" | "work" | "friendly" | "story" | "random";
+export type CoverLanguage = "en" | "bn" | "hi" | "es" | "fr" | "de" | "ar";
 
 type ScenarioStyle = Exclude<CoverStyle, "auto">;
 
@@ -6,6 +7,58 @@ type Scenario = {
   style: ScenarioStyle;
   situation: string;
 };
+
+type LanguageConfig = {
+  value: CoverLanguage;
+  label: string;
+  promptName: string;
+  instruction: string;
+};
+
+export const COVER_LANGUAGES: readonly LanguageConfig[] = [
+  {
+    value: "en",
+    label: "English",
+    promptName: "English",
+    instruction: "Write natural everyday English.",
+  },
+  {
+    value: "bn",
+    label: "বাংলা",
+    promptName: "Bengali (বাংলা)",
+    instruction: "Write natural conversational Bengali in Bengali script, not transliterated Bengali.",
+  },
+  {
+    value: "hi",
+    label: "हिन्दी",
+    promptName: "Hindi (हिन्दी)",
+    instruction: "Write natural conversational Hindi in Devanagari script, not transliterated Hindi.",
+  },
+  {
+    value: "es",
+    label: "Español",
+    promptName: "Spanish (Español)",
+    instruction: "Write natural everyday Spanish that sounds native rather than translated.",
+  },
+  {
+    value: "fr",
+    label: "Français",
+    promptName: "French (Français)",
+    instruction: "Write natural everyday French that sounds native rather than translated.",
+  },
+  {
+    value: "de",
+    label: "Deutsch",
+    promptName: "German (Deutsch)",
+    instruction: "Write natural everyday German that sounds native rather than translated.",
+  },
+  {
+    value: "ar",
+    label: "العربية",
+    promptName: "Arabic (العربية)",
+    instruction: "Write natural conversational Modern Standard Arabic in Arabic script, not transliteration.",
+  },
+] as const;
 
 const scenarios: Scenario[] = [
   { style: "casual", situation: "Text a friend that the bus is moving slowly and you will be about ten minutes late." },
@@ -54,32 +107,68 @@ const scenarios: Scenario[] = [
   { style: "random", situation: "Say you opened the cupboard looking for tea and found the missing tape measure instead." },
 ];
 
-const fallbackCovers = [
-  "The parcel turned up behind the side gate, so you can ignore my message from earlier.",
-  "I found the keys in my jacket pocket, which saves us both from looking for them again.",
-  "The bakery by the station is closed today, so I grabbed something from the place across the road.",
-  "The bus is crawling through traffic, so I will probably be about ten minutes late.",
-  "I picked up the groceries on the way back, so that is one less thing to do tomorrow.",
-  "Room 3B is free after two, so I moved our catch-up there and kept the same time.",
-  "The latest draft is in the shared folder, and the heading is the only bit I have not checked yet.",
-  "The client sent the final images this morning, and I have added them to the project folder.",
-  "I saved the last slice of cake for you, and it is still hiding at the back of the fridge.",
-  "Your umbrella is still by my front door, so I can bring it next time we meet.",
-  "That little shop you like has finally reopened, and it looks almost exactly the same inside.",
-  "I found the book you mentioned yesterday and picked up a copy while I was out.",
-  "There was one empty chair in the sun outside the café, so I took it before anyone else noticed.",
-  "Someone left a tiny bunch of flowers on the wall beside the bus stop this morning.",
-  "The lift stopped at every floor on the way down even though nobody else got in.",
-  "The supermarket had no lemons at all, but somehow there was an entire shelf of limes.",
-  "That single glove is still sitting on the same fence post for the third day in a row.",
-  "I opened the cupboard looking for tea and finally found the tape measure instead.",
-  "The vending machine gave me two packets for the price of one, so I am calling that a win.",
-  "The park is unusually quiet this morning, and the weather is much better than I expected.",
-];
+const fallbackCovers: Record<CoverLanguage, readonly string[]> = {
+  en: [
+    "The parcel turned up behind the side gate, so you can ignore my message from earlier.",
+    "I found the keys in my jacket pocket, which saves us both from looking for them again.",
+    "The bakery by the station is closed today, so I grabbed something from the place across the road.",
+    "The bus is crawling through traffic, so I will probably be about ten minutes late.",
+    "Your umbrella is still by my front door, so I can bring it next time we meet.",
+    "The park is unusually quiet this morning, and the weather is much better than I expected.",
+  ],
+  bn: [
+    "বাসটা আজ খুব ধীরে চলছে, তাই আমার পৌঁছাতে দশ মিনিটের মতো দেরি হবে।",
+    "চাবিগুলো জ্যাকেটের পকেটেই ছিল, তাই আর খুঁজতে হবে না।",
+    "স্টেশনের পাশের বেকারিটা আজ বন্ধ, তাই রাস্তার ওপারের দোকান থেকে কিছু নিয়ে নিলাম।",
+    "পার্সেলটা সামনের দরজায় নয়, পাশের গেটের পেছনে রেখে গেছে।",
+    "তোমার ছাতাটা এখনও আমার বাসায় আছে, পরেরবার দেখা হলে নিয়ে আসব।",
+    "আজ সকালে পার্কটা বেশ শান্ত, আর আবহাওয়াও ভাবনার চেয়ে ভালো।",
+  ],
+  hi: [
+    "आज बस बहुत धीरे चल रही है, इसलिए मुझे पहुँचने में करीब दस मिनट देर होगी।",
+    "चाबियाँ जैकेट की जेब में ही थीं, अब उन्हें ढूँढने की जरूरत नहीं है।",
+    "स्टेशन के पास वाली बेकरी आज बंद है, इसलिए मैंने सामने वाली दुकान से कुछ ले लिया।",
+    "पार्सल सामने के दरवाज़े पर नहीं, साइड गेट के पीछे रखा है।",
+    "तुम्हारी छतरी अभी भी मेरे यहाँ है, अगली बार मिलेंगे तो साथ ले आऊँगा।",
+    "आज सुबह पार्क काफी शांत है और मौसम भी उम्मीद से बेहतर है।",
+  ],
+  es: [
+    "El autobús va muy lento, así que llegaré unos diez minutos tarde.",
+    "Las llaves estaban en el bolsillo de la chaqueta, así que ya no hace falta buscarlas.",
+    "La panadería de la estación está cerrada hoy, así que compré algo en el local de enfrente.",
+    "El paquete está detrás de la puerta lateral, no junto a la entrada principal.",
+    "Tu paraguas sigue en mi casa, así que te lo llevo la próxima vez que nos veamos.",
+    "El parque está muy tranquilo esta mañana y hace mejor tiempo de lo que esperaba.",
+  ],
+  fr: [
+    "Le bus avance très lentement, donc j'aurai environ dix minutes de retard.",
+    "Les clés étaient dans la poche de ma veste, donc plus besoin de les chercher.",
+    "La boulangerie près de la gare est fermée aujourd'hui, alors j'ai pris quelque chose en face.",
+    "Le colis a été laissé derrière le portail sur le côté, pas devant la porte.",
+    "Ton parapluie est toujours chez moi, je te le rapporterai la prochaine fois.",
+    "Le parc est vraiment calme ce matin et il fait meilleur que prévu.",
+  ],
+  de: [
+    "Der Bus fährt heute sehr langsam, deshalb komme ich ungefähr zehn Minuten später.",
+    "Die Schlüssel waren in meiner Jackentasche, also müssen wir nicht mehr danach suchen.",
+    "Die Bäckerei am Bahnhof ist heute zu, deshalb habe ich gegenüber etwas geholt.",
+    "Das Paket liegt hinter dem Seitentor und nicht vor der Haustür.",
+    "Dein Regenschirm ist noch bei mir, ich bringe ihn beim nächsten Mal mit.",
+    "Der Park ist heute Morgen ungewöhnlich ruhig und das Wetter ist besser als erwartet.",
+  ],
+  ar: [
+    "الحافلة تسير ببطء اليوم، لذلك سأتأخر حوالي عشر دقائق.",
+    "وجدت المفاتيح في جيب السترة، لذلك لا داعي للبحث عنها أكثر.",
+    "المخبز القريب من المحطة مغلق اليوم، فأخذت شيئًا من المتجر المقابل.",
+    "تم ترك الطرد خلف البوابة الجانبية وليس أمام الباب الرئيسي.",
+    "مظلتك ما زالت عندي، وسأحضرها معي في المرة القادمة التي نلتقي فيها.",
+    "الحديقة هادئة جدًا هذا الصباح والطقس أفضل مما توقعت.",
+  ],
+};
 
 const voiceInstructions: Record<CoverStyle, string> = {
-  auto: "Natural everyday English. Choose the register that best fits the situation.",
-  casual: "Casual text-message English. Plain, relaxed, and not polished.",
+  auto: "Choose the register that best fits the situation. Keep it ordinary, direct, and believable.",
+  casual: "Casual and relaxed, like a normal text message.",
   work: "A natural message to a colleague. Professional without sounding corporate or formal.",
   friendly: "A warm message to someone familiar. Friendly without sounding sentimental.",
   story: "A brief everyday anecdote. Concrete and understated rather than dramatic or literary.",
@@ -103,24 +192,32 @@ function scenariosForStyle(style: CoverStyle) {
   return scenarios.filter((scenario) => scenario.style === style);
 }
 
-export function createFallbackCover() {
-  return pick(fallbackCovers);
+function languageConfig(language: CoverLanguage) {
+  return COVER_LANGUAGES.find((option) => option.value === language) ?? COVER_LANGUAGES[0];
 }
 
-export function buildCoverPrompt(style: CoverStyle) {
+export function createFallbackCover(language: CoverLanguage = "en") {
+  return pick(fallbackCovers[language] ?? fallbackCovers.en);
+}
+
+export function buildCoverPrompt(style: CoverStyle, language: CoverLanguage = "en") {
   const available = scenariosForStyle(style);
   const scenario = pick(available.length > 0 ? available : scenarios);
   const targetWords = 10 + randomIndex(11);
+  const selectedLanguage = languageConfig(language);
 
   return [
+    `Target language: ${selectedLanguage.promptName}.`,
+    selectedLanguage.instruction,
     `Situation: ${scenario.situation}`,
     `Voice: ${voiceInstructions[style]}`,
     `Write one believable message of roughly ${targetWords} words. Naturalness matters more than hitting the exact count.`,
-    "Use plain English, one clear point, and normal contractions when they fit.",
+    "Write how a native speaker would actually send this message rather than translating the situation word for word.",
+    "Keep one clear point and use normal everyday phrasing.",
     "Sound like a real person who typed the message without overthinking it.",
     "Do not make it reflective, literary, quirky, overly descriptive, or assistant-like.",
     "Never mention hiding, secrets, encryption, passwords, codes, models, AI, technology, steganography, or this task.",
-    "Output only the message, with no label or explanation.",
+    `Output only the message in ${selectedLanguage.promptName}, with no label, translation, or explanation.`,
   ].join("\n");
 }
 
@@ -132,6 +229,6 @@ export function cleanGeneratedCover(value: string) {
     .replace(/^['\"]|['\"]$/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .split(/(?<=[.!?])\s+/)[0]
+    .split(/(?<=[.!?।؟])\s+/u)[0]
     .trim();
 }
