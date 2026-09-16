@@ -38,9 +38,17 @@ export default function LearnPage() {
           </section>
 
           <section className="learn-block">
+            <h2>Languages</h2>
+            <div>
+              <p>The hidden message can be written in any Unicode language. Automatic visible text uses English by default and currently supports English, বাংলা, हिन्दी, Español, Français, Deutsch and العربية.</p>
+              <p>If you choose <strong>My own text</strong>, the visible text can also be written in any language.</p>
+            </div>
+          </section>
+
+          <section className="learn-block">
             <h2>Reveal</h2>
             <div>
-              <p>Paste the complete visible text without editing it, then select <strong>Reveal message</strong>. plaintext.fun reads the invisible characters and reconstructs the original message.</p>
+              <p>Paste the complete visible text without editing it, then select <strong>Reveal</strong>. plaintext.fun reads the invisible characters and reconstructs the original message, regardless of the language it was written in.</p>
             </div>
           </section>
 
@@ -68,7 +76,7 @@ export default function LearnPage() {
                 <li>Some apps and services may remove or normalize invisible Unicode characters. If that happens, the hidden message may not survive.</li>
                 <li>If you use a password, the recipient needs the same password to reveal the message.</li>
                 <li>If confidentiality matters, use a password. Hiding a message is not the same as encrypting it.</li>
-                <li>If browser-based text generation is unavailable, plaintext.fun uses built-in fallback text and the hide and reveal process still works.</li>
+                <li>If browser-based text generation is unavailable, plaintext.fun uses built-in fallback text in the selected automatic language and the hide and reveal process still works.</li>
               </ul>
             </div>
           </section>
