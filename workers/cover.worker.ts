@@ -1,5 +1,3 @@
-import { pipeline } from "@huggingface/transformers";
-
 const MODEL_ID = "onnx-community/LFM2.5-350M-ONNX";
 const MAX_RECENT_COVERS = 80;
 const MAX_GENERATION_ATTEMPTS = 4;
@@ -64,25 +62,28 @@ async function getGenerator() {
   if (!generatorPromise) {
     post("status", { status: "loading", message: "Preparing text engine…" });
     hasTotalProgress = false;
-    generatorPromise = pipeline("text-generation", MODEL_ID, {
-      device: "webgpu",
-      dtype: "q4",
-      progress_callback: (progress: any) => {
-        if (progress?.status === "progress_total" && typeof progress?.progress === "number") {
-          hasTotalProgress = true;
-          post("progress", {
-            progress: Math.max(0, Math.min(100, Math.round(progress.progress))),
-          });
-          return;
-        }
+    generatorPromise = (async () => {
+      const { pipeline } = await import("@huggingface/transformers");
+      return pipeline("text-generation", MODEL_ID, {
+        device: "webgpu",
+        dtype: "q4",
+        progress_callback: (progress: any) => {
+          if (progress?.status === "progress_total" && typeof progress?.progress === "number") {
+            hasTotalProgress = true;
+            post("progress", {
+              progress: Math.max(0, Math.min(100, Math.round(progress.progress))),
+            });
+            return;
+          }
 
-        if (!hasTotalProgress && typeof progress?.progress === "number") {
-          post("progress", {
-            progress: Math.max(0, Math.min(100, Math.round(progress.progress))),
-          });
-        }
-      },
-    });
+          if (!hasTotalProgress && typeof progress?.progress === "number") {
+            post("progress", {
+              progress: Math.max(0, Math.min(100, Math.round(progress.progress))),
+            });
+          }
+        },
+      });
+    })();
   }
 
   try {
@@ -433,8 +434,8 @@ function safeLanguage(value: unknown): CoverLanguage {
 self.onmessage = async (event: MessageEvent) => {
   const message = event.data;
 
-  // Startup must stay cheap and stable. The model is loaded lazily only when the
-  // user explicitly asks plaintext to generate visible text.
+  // Startup must stay cheap and stable. The heavy generation dependency and
+  // model are both loaded only after an explicit generation request.
   if (message?.type === "load" || message?.type === "prime") {
     return;
   }
