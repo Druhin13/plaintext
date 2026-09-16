@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildCoverPrompt, cleanGeneratedCover, createFallbackCover } from "@/lib/cover";
+import {
+  buildCoverPrompt,
+  cleanGeneratedCover,
+  COVER_LANGUAGES,
+  createFallbackCover,
+  type CoverLanguage,
+} from "@/lib/cover";
 import { createPacket, parsePacket, revealPacket } from "@/lib/packet";
 import { bytesToInvisible, countHiddenCharacters, embedInvisiblePayload, invisibleToBytes } from "@/lib/stego";
 
@@ -56,6 +62,7 @@ export default function Home() {
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
   const [coverMode, setCoverMode] = useState<CoverMode>("automatic");
+  const [language, setLanguage] = useState<CoverLanguage>("en");
   const [customCover, setCustomCover] = useState("");
   const [output, setOutput] = useState("");
   const [revealInput, setRevealInput] = useState("");
@@ -73,6 +80,10 @@ export default function Home() {
 
   const revealHiddenCount = useMemo(() => countHiddenCharacters(revealInput), [revealInput]);
   const currentStep = mode === "hide" ? hideStep : revealStep;
+  const selectedLanguage = useMemo(
+    () => COVER_LANGUAGES.find((option) => option.value === language) ?? COVER_LANGUAGES[0],
+    [language],
+  );
 
   const revealInputStatus = useMemo(() => {
     if (!revealInput) return "Waiting";
@@ -138,43 +149,50 @@ export default function Home() {
   }, [getWorker]);
 
   useEffect(() => {
-    if (modelState !== "ready" || !("gpu" in navigator)) {
+    if (coverMode !== "automatic" || modelState !== "ready" || !("gpu" in navigator)) {
       return;
     }
 
     const worker = getWorker();
     worker.postMessage({
       type: "prime",
-      cacheKey: "auto",
-      prompt: buildCoverPrompt("auto"),
+      cacheKey: `auto:${language}`,
+      prompt: buildCoverPrompt("auto", language),
+      language,
       target: 2,
     });
-  }, [getWorker, modelState]);
+  }, [coverMode, getWorker, language, modelState]);
 
   const generateCover = useCallback(async () => {
     if (!("gpu" in navigator)) {
       setModelState("error");
-      return createFallbackCover();
+      return createFallbackCover(language);
     }
 
     try {
       const worker = getWorker();
       const requestId = makeId();
-      const prompt = buildCoverPrompt("auto");
+      const prompt = buildCoverPrompt("auto", language);
       const generated = await new Promise<string>((resolve, reject) => {
         pendingRef.current = { id: requestId, resolve, reject };
-        worker.postMessage({ type: "generate", requestId, prompt, cacheKey: "auto" });
+        worker.postMessage({
+          type: "generate",
+          requestId,
+          prompt,
+          cacheKey: `auto:${language}`,
+          language,
+        });
       });
       const cleaned = cleanGeneratedCover(generated);
-      if (cleaned.length < 20) {
+      if (cleaned.length < 12) {
         throw new Error("Generated text was too short.");
       }
       return cleaned;
     } catch {
       setModelState("error");
-      return createFallbackCover();
+      return createFallbackCover(language);
     }
-  }, [getWorker]);
+  }, [getWorker, language]);
 
   async function handleHide() {
     if (!secret.trim()) {
@@ -195,7 +213,7 @@ export default function Home() {
     setAnnouncement(
       coverMode === "custom"
         ? "Hiding your message inside the visible text you wrote."
-        : "Creating visible text and hiding your message inside it.",
+        : `Creating visible text in ${selectedLanguage.label} and hiding your message inside it.`,
     );
 
     try {
@@ -293,6 +311,7 @@ export default function Home() {
     setSecret("");
     setPassword("");
     setCoverMode("automatic");
+    setLanguage("en");
     setCustomCover("");
     setOutput("");
     setCopied(false);
@@ -352,7 +371,7 @@ export default function Home() {
                 <div className="step-heading">
                   <p className="step-kicker">Hide · 01/03</p>
                   <h2 id="hide-step-one-title">What do you want to hide?</h2>
-                  <p className="step-intro">Write the message exactly as you want it recovered later.</p>
+                  <p className="step-intro">Write the message exactly as you want it recovered later. Any language works here.</p>
                 </div>
 
                 <form className="step-form" onSubmit={(event) => { event.preventDefault(); continueHide(); }}>
@@ -364,6 +383,7 @@ export default function Home() {
                       onChange={(event) => setSecret(event.target.value)}
                       placeholder="Meet me by the old cinema at 8."
                       spellCheck={false}
+                      dir="auto"
                       autoFocus
                     />
                   </label>
@@ -382,7 +402,7 @@ export default function Home() {
                 <div className="step-heading">
                   <p className="step-kicker">Hide · 02/03</p>
                   <h2 id="hide-step-two-title">Choose the outside.</h2>
-                  <p className="step-intro">Let plaintext write the visible text automatically, or type exactly what you want people to see.</p>
+                  <p className="step-intro">Let plaintext write the visible text in your language, or type exactly what you want people to see.</p>
                 </div>
 
                 <form className="step-form" onSubmit={(event) => { event.preventDefault(); void handleHide(); }}>
@@ -404,15 +424,37 @@ export default function Home() {
                     </select>
                   </label>
 
+                  {coverMode === "automatic" && (
+                    <label className="select-field" htmlFor="cover-language">
+                      <span className="field-topline">
+                        <span>Output language</span>
+                        <span>{selectedLanguage.label}</span>
+                      </span>
+                      <select
+                        id="cover-language"
+                        value={language}
+                        onChange={(event) => {
+                          setLanguage(event.target.value as CoverLanguage);
+                          setNotice("");
+                        }}
+                      >
+                        {COVER_LANGUAGES.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+
                   {coverMode === "custom" && (
                     <label className="editor-field password-field" htmlFor="custom-cover-input">
-                      <span className="editor-meta"><span>What people will see</span><span>{customCover.length}</span></span>
+                      <span className="editor-meta"><span>What people will see</span><span>Any language · {customCover.length}</span></span>
                       <textarea
                         id="custom-cover-input"
                         value={customCover}
                         onChange={(event) => setCustomCover(event.target.value)}
                         placeholder="Dinner moved to 8. I’ll meet you there."
                         spellCheck={false}
+                        dir="auto"
                         autoFocus
                       />
                     </label>
@@ -450,7 +492,13 @@ export default function Home() {
 
                 <div className="result-box">
                   <div className="result-meta"><span>Visible text</span><span>Ready</span></div>
-                  <div className="output-copy">{output}</div>
+                  <div
+                    className="output-copy"
+                    lang={coverMode === "automatic" ? language : undefined}
+                    dir="auto"
+                  >
+                    {output}
+                  </div>
                 </div>
 
                 {notice && <div className="notice" role="alert">{notice}</div>}
@@ -474,7 +522,7 @@ export default function Home() {
                 <div className="step-heading">
                   <p className="step-kicker">Reveal · 01/03</p>
                   <h2 id="reveal-step-one-title">Paste the text.</h2>
-                  <p className="step-intro">Use the complete text exactly as you received it.</p>
+                  <p className="step-intro">Use the complete text exactly as you received it. The hidden message can be in any language.</p>
                 </div>
 
                 <form className="step-form" onSubmit={(event) => { event.preventDefault(); void handleReveal(); }}>
@@ -486,6 +534,7 @@ export default function Home() {
                       onChange={(event) => setRevealInput(event.target.value)}
                       placeholder="Paste the complete text here."
                       spellCheck={false}
+                      dir="auto"
                       autoFocus
                     />
                   </label>
@@ -539,7 +588,7 @@ export default function Home() {
 
                 <div className="result-box secret-box">
                   <div className="result-meta"><span>Hidden message</span><span>Open</span></div>
-                  <div className="secret-result">{revealedSecret}</div>
+                  <div className="secret-result" dir="auto">{revealedSecret}</div>
                 </div>
 
                 <div className="result-actions single-action">
