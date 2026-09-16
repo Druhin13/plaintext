@@ -96,72 +96,60 @@ export default function Home() {
       return workerRef.current;
     }
 
-    const worker = new Worker(new URL("../workers/cover.worker.ts", import.meta.url), { type: "module" });
-    worker.onmessage = (event) => {
-      const message = event.data;
-      if (message?.type === "status") {
-        setModelState(message.status);
-      }
-      if (message?.type === "progress") {
-        setModelProgress(message.progress ?? 0);
-      }
-      if (message?.type === "generated") {
-        const pending = pendingRef.current;
-        if (pending && pending.id === message.requestId) {
-          pendingRef.current = null;
-          pending.resolve(message.text ?? "");
+    try {
+      const worker = new Worker(new URL("../workers/cover.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (event) => {
+        const message = event.data;
+        if (message?.type === "status") {
+          setModelState(message.status);
         }
-      }
-      if (message?.type === "error") {
+        if (message?.type === "progress") {
+          setModelProgress(message.progress ?? 0);
+        }
+        if (message?.type === "generated") {
+          const pending = pendingRef.current;
+          if (pending && pending.id === message.requestId) {
+            pendingRef.current = null;
+            pending.resolve(message.text ?? "");
+          }
+        }
+        if (message?.type === "error") {
+          setModelState("error");
+          const pending = pendingRef.current;
+          if (pending && (!message.requestId || pending.id === message.requestId)) {
+            pendingRef.current = null;
+            pending.reject(new Error(message.message || "Text generator unavailable."));
+          }
+        }
+      };
+      worker.onerror = (event) => {
+        event.preventDefault();
         setModelState("error");
-        const pending = pendingRef.current;
-        if (pending && (!message.requestId || pending.id === message.requestId)) {
-          pendingRef.current = null;
-          pending.reject(new Error(message.message || "Text generator unavailable."));
+        if (workerRef.current === worker) {
+          workerRef.current = null;
         }
-      }
-    };
-    worker.onerror = () => {
+        const pending = pendingRef.current;
+        pendingRef.current = null;
+        if (pending) {
+          pending.reject(new Error("Text generator failed."));
+        }
+        worker.terminate();
+      };
+      workerRef.current = worker;
+      return worker;
+    } catch {
       setModelState("error");
-      const pending = pendingRef.current;
-      pendingRef.current = null;
-      if (pending) {
-        pending.reject(new Error("Text generator failed."));
-      }
-    };
-    workerRef.current = worker;
-    return worker;
+      return null;
+    }
   }, []);
 
   useEffect(() => {
-    if (!("gpu" in navigator)) {
-      setModelState("error");
-      return;
-    }
-
-    const worker = getWorker();
-    worker.postMessage({ type: "load" });
-
     return () => {
       workerRef.current?.terminate();
       workerRef.current = null;
+      pendingRef.current = null;
     };
-  }, [getWorker]);
-
-  useEffect(() => {
-    if (coverMode !== "automatic" || modelState !== "ready" || !("gpu" in navigator)) {
-      return;
-    }
-
-    const worker = getWorker();
-    worker.postMessage({
-      type: "prime",
-      cacheKey: `auto:${language}`,
-      prompt: buildCoverPrompt("auto", language),
-      language,
-      target: 2,
-    });
-  }, [coverMode, getWorker, language, modelState]);
+  }, []);
 
   const generateCover = useCallback(async () => {
     if (!("gpu" in navigator)) {
@@ -171,10 +159,38 @@ export default function Home() {
 
     try {
       const worker = getWorker();
+      if (!worker) {
+        return createFallbackCover(language);
+      }
+
       const requestId = makeId();
       const prompt = buildCoverPrompt("auto", language);
       const generated = await new Promise<string>((resolve, reject) => {
-        pendingRef.current = { id: requestId, resolve, reject };
+        const timeout = window.setTimeout(() => {
+          if (pendingRef.current?.id !== requestId) {
+            return;
+          }
+
+          pendingRef.current = null;
+          if (workerRef.current === worker) {
+            workerRef.current = null;
+          }
+          worker.terminate();
+          reject(new Error("Text generation timed out."));
+        }, 45000);
+
+        pendingRef.current = {
+          id: requestId,
+          resolve: (value) => {
+            window.clearTimeout(timeout);
+            resolve(value);
+          },
+          reject: (error) => {
+            window.clearTimeout(timeout);
+            reject(error);
+          },
+        };
+
         worker.postMessage({
           type: "generate",
           requestId,
@@ -183,6 +199,7 @@ export default function Home() {
           language,
         });
       });
+
       const cleaned = cleanGeneratedCover(generated);
       if (cleaned.length < 12) {
         throw new Error("Generated text was too short.");
