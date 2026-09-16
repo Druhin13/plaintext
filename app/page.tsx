@@ -386,33 +386,26 @@ export default function Home() {
                 </div>
 
                 <form className="step-form" onSubmit={(event) => { event.preventDefault(); void handleHide(); }}>
-                  <div className="cover-mode-field">
-                    <div className="field-topline">
+                  <label className="select-field" htmlFor="cover-mode">
+                    <span className="field-topline">
                       <span>Visible text</span>
                       <span>{coverMode === "automatic" ? "Generated for you" : "Exactly as written"}</span>
-                    </div>
-                    <div className="cover-mode-switch" role="group" aria-label="Choose visible text source">
-                      <button
-                        className={coverMode === "automatic" ? "active" : ""}
-                        type="button"
-                        onClick={() => { setCoverMode("automatic"); setNotice(""); }}
-                        aria-pressed={coverMode === "automatic"}
-                      >
-                        Automatic
-                      </button>
-                      <button
-                        className={coverMode === "custom" ? "active" : ""}
-                        type="button"
-                        onClick={() => { setCoverMode("custom"); setNotice(""); }}
-                        aria-pressed={coverMode === "custom"}
-                      >
-                        My text
-                      </button>
-                    </div>
-                  </div>
+                    </span>
+                    <select
+                      id="cover-mode"
+                      value={coverMode}
+                      onChange={(event) => {
+                        setCoverMode(event.target.value as CoverMode);
+                        setNotice("");
+                      }}
+                    >
+                      <option value="automatic">Automatic</option>
+                      <option value="custom">My own text</option>
+                    </select>
+                  </label>
 
                   {coverMode === "custom" && (
-                    <label className="editor-field custom-cover-field" htmlFor="custom-cover-input">
+                    <label className="editor-field password-field" htmlFor="custom-cover-input">
                       <span className="editor-meta"><span>What people will see</span><span>{customCover.length}</span></span>
                       <textarea
                         id="custom-cover-input"
