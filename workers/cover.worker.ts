@@ -3,8 +3,49 @@ import { pipeline } from "@huggingface/transformers";
 const MODEL_ID = "onnx-community/LFM2.5-350M-ONNX";
 const DEFAULT_CACHE_TARGET = 2;
 const MAX_RECENT_COVERS = 80;
-const MAX_GENERATION_ATTEMPTS = 6;
-const MAX_SIMILARITY = 0.72;
+const MAX_GENERATION_ATTEMPTS = 4;
+const MIN_ACCEPTABLE_QUALITY = 62;
+
+const SYSTEM_PROMPT = [
+  "You write realistic one-sentence English messages that could genuinely be sent by a person.",
+  "Prefer ordinary phrasing, simple syntax, concrete details, and natural contractions.",
+  "Do not sound like an assistant, storyteller, copywriter, or creative-writing exercise.",
+  "Do not add commentary, labels, explanations, quotation marks, or multiple options.",
+  "Return only the message.",
+].join(" ");
+
+const variationDirections = [
+  "Keep the syntax simple and direct.",
+  "Lead with the practical detail rather than background context.",
+  "Use a contraction if one fits naturally.",
+  "Write it like a message typed quickly on a phone.",
+  "Keep the tone matter-of-fact and understated.",
+  "Prefer concrete nouns and verbs over descriptive language.",
+  "Let the sentence sound slightly imperfect rather than polished.",
+  "Keep one clear point and avoid explaining why it matters.",
+];
+
+const unnaturalPhrases = [
+  "for some reason",
+  "it turns out",
+  "i ended up",
+  "i noticed",
+  "i somehow",
+  "i was thinking",
+  "just wanted to",
+  "oddly",
+  "which felt",
+  "kind of nice",
+  "probably says a lot",
+  "basically my",
+  "so i guess",
+  "and now i cannot stop",
+  "could not help but",
+  "little did i know",
+];
+
+const forbiddenContent = /\b(secret|secrets|hidden|hiding|hide|encryption|encrypted|encrypt|password|passwords|steganography|model|models|artificial intelligence|\bai\b)\b/i;
+const assistantOpening = /^(sure|certainly|absolutely|of course|here(?:'s| is)|the sentence|message:|sentence:|output:)/i;
 
 let generatorPromise: Promise<any> | null = null;
 let hasTotalProgress = false;
@@ -15,39 +56,6 @@ const backgroundTasks: Array<() => Promise<void>> = [];
 const coverCache = new Map<string, string[]>();
 const primingCounts = new Map<string, number>();
 const recentCovers: string[] = [];
-
-const openingDirections = [
-  "Start directly with an action or concrete detail.",
-  "Start with a natural time phrase.",
-  "Start with a place or setting if it feels natural.",
-  "Avoid beginning with a first-person pronoun.",
-  "Use a conversational first-person opening that is not a greeting.",
-  "Start mid-thought in a way that still makes sense on its own.",
-  "Open with the mundane subject itself rather than explaining context.",
-  "Use an understated observation as the opening.",
-];
-
-const rhythmDirections = [
-  "Keep the syntax simple and direct.",
-  "Use one natural subordinate clause.",
-  "Use a slightly clipped text-message rhythm.",
-  "Use a relaxed spoken rhythm with one contraction.",
-  "Make the sentence practical rather than reflective.",
-  "Make the sentence observational rather than explanatory.",
-  "Use a different sentence shape from a typical assistant response.",
-  "Keep the wording plain and unpolished, like a real message typed quickly.",
-];
-
-const detailDirections = [
-  "Include one specific but unremarkable physical detail.",
-  "Include one ordinary time reference if it fits.",
-  "Include one mundane place detail if it fits.",
-  "Include one everyday object or food detail if it fits.",
-  "Keep details sparse and believable.",
-  "Use no adjective unless it sounds completely natural.",
-  "Prefer concrete nouns over vague emotional language.",
-  "Avoid coffee, lunch, rain, routes home, and reminders for this variation.",
-];
 
 function post(type: string, payload: Record<string, unknown> = {}) {
   self.postMessage({ type, ...payload });
@@ -65,7 +73,7 @@ function pick<T>(items: readonly T[]) {
 
 async function getGenerator() {
   if (!generatorPromise) {
-    post("status", { status: "loading", message: "Loading local AI in your browser…" });
+    post("status", { status: "loading", message: "Preparing text engine…" });
     hasTotalProgress = false;
     generatorPromise = pipeline("text-generation", MODEL_ID, {
       device: "webgpu",
@@ -91,7 +99,7 @@ async function getGenerator() {
   try {
     const generator = await generatorPromise;
     post("progress", { progress: 100 });
-    post("status", { status: "ready", message: "Local AI ready" });
+    post("status", { status: "ready", message: "Text engine ready" });
     return generator;
   } catch (error) {
     generatorPromise = null;
@@ -123,6 +131,7 @@ function extractGeneratedText(result: any) {
 
 function cleanCandidate(value: string) {
   return value
+    .replace(/<\|[^>]+\|>/g, " ")
     .replace(/^.*?assistant\s*[:\n]/i, "")
     .replace(/^[-*\s]+/, "")
     .replace(/^['\"]|['\"]$/g, "")
@@ -140,15 +149,19 @@ function normalizeCover(value: string) {
     .trim();
 }
 
+function words(value: string) {
+  return normalizeCover(value).split(" ").filter(Boolean);
+}
+
 function tokenSet(value: string) {
-  return new Set(normalizeCover(value).split(" ").filter(Boolean));
+  return new Set(words(value));
 }
 
 function bigramSet(value: string) {
-  const words = normalizeCover(value).split(" ").filter(Boolean);
+  const values = words(value);
   const bigrams = new Set<string>();
-  for (let index = 0; index < words.length - 1; index += 1) {
-    bigrams.add(`${words[index]} ${words[index + 1]}`);
+  for (let index = 0; index < values.length - 1; index += 1) {
+    bigrams.add(`${values[index]} ${values[index + 1]}`);
   }
   return bigrams;
 }
@@ -185,9 +198,9 @@ function sentenceSimilarity(left: string, right: string) {
   const bigramSimilarity = jaccard(bigramSet(left), bigramSet(right));
   const leftOpening = normalizedLeft.split(" ").slice(0, 4).join(" ");
   const rightOpening = normalizedRight.split(" ").slice(0, 4).join(" ");
-  const openingPenalty = leftOpening.length > 0 && leftOpening === rightOpening ? 0.9 : 0;
+  const openingPenalty = leftOpening.length > 0 && leftOpening === rightOpening ? 0.88 : 0;
 
-  return Math.max(wordSimilarity * 0.58 + bigramSimilarity * 0.42, openingPenalty);
+  return Math.max(wordSimilarity * 0.55 + bigramSimilarity * 0.45, openingPenalty);
 }
 
 function maxRecentSimilarity(candidate: string) {
@@ -214,21 +227,73 @@ function rememberCover(candidate: string) {
   }
 }
 
-function buildAttemptPrompt(basePrompt: string, attempt: number) {
-  const recent = recentCovers
-    .slice(-6)
-    .map((value) => `“${value}”`)
-    .join(" | ");
+function hasRepeatedAdjacentWord(candidate: string) {
+  const values = words(candidate);
+  for (let index = 1; index < values.length; index += 1) {
+    if (values[index] === values[index - 1]) {
+      return true;
+    }
+  }
+  return false;
+}
 
+function naturalnessScore(candidate: string) {
+  const normalized = normalizeCover(candidate);
+  const wordCount = words(candidate).length;
+
+  if (!candidate || wordCount < 7 || wordCount > 30) {
+    return 0;
+  }
+
+  if (assistantOpening.test(candidate) || forbiddenContent.test(candidate)) {
+    return 0;
+  }
+
+  if (/[*#{}\[\]<>`]/.test(candidate) || hasRepeatedAdjacentWord(candidate)) {
+    return 0;
+  }
+
+  const sentenceEndings = candidate.match(/[.!?](?=\s|$)/g)?.length ?? 0;
+  if (sentenceEndings > 1) {
+    return 0;
+  }
+
+  let score = 100;
+
+  if (wordCount < 9) score -= (9 - wordCount) * 4;
+  if (wordCount > 22) score -= (wordCount - 22) * 3;
+
+  for (const phrase of unnaturalPhrases) {
+    if (normalized.includes(phrase)) {
+      score -= 16;
+    }
+  }
+
+  const commaCount = (candidate.match(/,/g) ?? []).length;
+  if (commaCount > 2) score -= (commaCount - 2) * 7;
+
+  if (/[;:]/.test(candidate)) score -= 8;
+  if (/[—–]/.test(candidate)) score -= 10;
+  if (/\([^)]{3,}\)/.test(candidate)) score -= 8;
+  if (/\b(really|very|quite|rather)\b.*\b(really|very|quite|rather)\b/i.test(candidate)) score -= 7;
+  if (/\b(which|that)\b.{0,28}\b(which|that)\b/i.test(candidate)) score -= 5;
+  if (/\b(i think|i feel like|i have to say|to be honest|honestly)\b/i.test(candidate)) score -= 10;
+
+  if (/\b(can't|won't|didn't|isn't|it's|i'm|i've|we're|that's|there's|you'll|i'll)\b/i.test(candidate)) {
+    score += 3;
+  }
+
+  if (/[.!?]$/.test(candidate)) score += 2;
+
+  return Math.max(0, Math.min(105, score));
+}
+
+function buildAttemptPrompt(basePrompt: string, attempt: number) {
   return [
     basePrompt,
-    `Fresh variation ${attempt + 1}: ${pick(openingDirections)}`,
-    pick(rhythmDirections),
-    pick(detailDirections),
-    "Use genuinely different wording, subject matter, and sentence structure from anything generated recently.",
-    recent ? `Do not repeat or closely paraphrase these recent outputs: ${recent}` : "Do not use a stock or template-like sentence.",
-    "Return only the new sentence.",
-  ].join(" ");
+    `Variation note: ${variationDirections[attempt % variationDirections.length]}`,
+    "Use fresh wording, but do not add extra ideas that are not needed for the situation.",
+  ].join("\n");
 }
 
 async function generateUniqueText(prompt: string, announce: boolean) {
@@ -239,50 +304,61 @@ async function generateUniqueText(prompt: string, announce: boolean) {
   }
 
   let bestCandidate = "";
-  let bestSimilarity = Number.POSITIVE_INFINITY;
+  let bestCombinedScore = Number.NEGATIVE_INFINITY;
+  let bestQuality = 0;
 
   try {
     for (let attempt = 0; attempt < MAX_GENERATION_ATTEMPTS; attempt += 1) {
-      const temperature = 0.96 + randomIndex(18) / 100 + attempt * 0.015;
-      const topP = 0.94 + randomIndex(5) / 100;
+      const temperatures = [0.18, 0.24, 0.32, 0.4] as const;
       const result = await generator(
-        [{ role: "user", content: buildAttemptPrompt(prompt, attempt) }],
+        [
+          { role: "system", content: SYSTEM_PROMPT },
+          { role: "user", content: buildAttemptPrompt(prompt, attempt) },
+        ],
         {
-          max_new_tokens: 64,
+          max_new_tokens: 48,
           do_sample: true,
-          temperature: Math.min(1.16, temperature),
-          top_p: Math.min(0.99, topP),
-          top_k: 80 + randomIndex(41),
-          repetition_penalty: 1.1,
+          temperature: temperatures[Math.min(attempt, temperatures.length - 1)],
+          top_p: 0.92,
+          top_k: 50,
+          repetition_penalty: 1.05,
         },
       );
 
       const candidate = cleanCandidate(extractGeneratedText(result));
-      if (candidate.length < 20 || hasExactRecentMatch(candidate)) {
+      if (!candidate || hasExactRecentMatch(candidate)) {
+        continue;
+      }
+
+      const quality = naturalnessScore(candidate);
+      if (quality === 0) {
         continue;
       }
 
       const similarity = maxRecentSimilarity(candidate);
-      if (similarity < bestSimilarity) {
+      const combinedScore = quality - similarity * 28;
+
+      if (combinedScore > bestCombinedScore) {
         bestCandidate = candidate;
-        bestSimilarity = similarity;
+        bestCombinedScore = combinedScore;
+        bestQuality = quality;
       }
 
-      if (similarity < MAX_SIMILARITY) {
+      if (attempt >= 1 && quality >= 92 && similarity <= 0.58) {
         rememberCover(candidate);
         return candidate;
       }
     }
 
-    if (bestCandidate) {
+    if (bestCandidate && bestQuality >= MIN_ACCEPTABLE_QUALITY) {
       rememberCover(bestCandidate);
       return bestCandidate;
     }
 
-    throw new Error("The local AI could not produce fresh visible text.");
+    throw new Error("The text engine could not produce a natural sentence.");
   } finally {
     if (announce) {
-      post("status", { status: "ready", message: "Local AI ready" });
+      post("status", { status: "ready", message: "Text engine ready" });
     }
   }
 }
@@ -388,7 +464,7 @@ self.onmessage = async (event: MessageEvent) => {
     } catch (error) {
       post("error", {
         requestId: message.requestId,
-        message: error instanceof Error ? error.message : "Unable to load the local AI.",
+        message: error instanceof Error ? error.message : "Unable to prepare the text engine.",
       });
     }
     return;
