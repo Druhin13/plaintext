@@ -2,28 +2,20 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { buildCoverPrompt, cleanGeneratedCover, createFallbackCover, type CoverStyle } from "@/lib/cover";
+import { buildCoverPrompt, cleanGeneratedCover, createFallbackCover } from "@/lib/cover";
 import { createPacket, parsePacket, revealPacket } from "@/lib/packet";
 import { bytesToInvisible, countHiddenCharacters, embedInvisiblePayload, invisibleToBytes } from "@/lib/stego";
 
 type Mode = "hide" | "reveal";
 type ModelState = "idle" | "loading" | "ready" | "generating" | "error";
 type Step = 1 | 2 | 3;
+type CoverMode = "automatic" | "custom";
 
 type PendingGeneration = {
   id: string;
   resolve: (value: string) => void;
   reject: (error: Error) => void;
 };
-
-const COVER_STYLES: Array<{ value: CoverStyle; label: string; hint: string }> = [
-  { value: "auto", label: "Automatic", hint: "Let plaintext choose" },
-  { value: "casual", label: "Casual", hint: "Everyday and relaxed" },
-  { value: "work", label: "Work", hint: "Neutral and professional" },
-  { value: "friendly", label: "Friendly", hint: "Warm and conversational" },
-  { value: "story", label: "Story", hint: "A little more narrative" },
-  { value: "random", label: "Random", hint: "Something unexpected" },
-];
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -63,7 +55,8 @@ export default function Home() {
   const [revealStep, setRevealStep] = useState<Step>(1);
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
-  const [coverStyle, setCoverStyle] = useState<CoverStyle>("auto");
+  const [coverMode, setCoverMode] = useState<CoverMode>("automatic");
+  const [customCover, setCustomCover] = useState("");
   const [output, setOutput] = useState("");
   const [revealInput, setRevealInput] = useState("");
   const [revealPassword, setRevealPassword] = useState("");
@@ -80,10 +73,6 @@ export default function Home() {
 
   const revealHiddenCount = useMemo(() => countHiddenCharacters(revealInput), [revealInput]);
   const currentStep = mode === "hide" ? hideStep : revealStep;
-  const selectedCoverStyle = useMemo(
-    () => COVER_STYLES.find((style) => style.value === coverStyle) ?? COVER_STYLES[0],
-    [coverStyle],
-  );
 
   const revealInputStatus = useMemo(() => {
     if (!revealInput) return "Waiting";
@@ -156,11 +145,11 @@ export default function Home() {
     const worker = getWorker();
     worker.postMessage({
       type: "prime",
-      cacheKey: coverStyle,
-      prompt: buildCoverPrompt(coverStyle),
+      cacheKey: "auto",
+      prompt: buildCoverPrompt("auto"),
       target: 2,
     });
-  }, [coverStyle, getWorker, modelState]);
+  }, [getWorker, modelState]);
 
   const generateCover = useCallback(async () => {
     if (!("gpu" in navigator)) {
@@ -171,10 +160,10 @@ export default function Home() {
     try {
       const worker = getWorker();
       const requestId = makeId();
-      const prompt = buildCoverPrompt(coverStyle);
+      const prompt = buildCoverPrompt("auto");
       const generated = await new Promise<string>((resolve, reject) => {
         pendingRef.current = { id: requestId, resolve, reject };
-        worker.postMessage({ type: "generate", requestId, prompt, cacheKey: coverStyle });
+        worker.postMessage({ type: "generate", requestId, prompt, cacheKey: "auto" });
       });
       const cleaned = cleanGeneratedCover(generated);
       if (cleaned.length < 20) {
@@ -185,7 +174,7 @@ export default function Home() {
       setModelState("error");
       return createFallbackCover();
     }
-  }, [coverStyle, getWorker]);
+  }, [getWorker]);
 
   async function handleHide() {
     if (!secret.trim()) {
@@ -194,14 +183,28 @@ export default function Home() {
       return;
     }
 
+    if (coverMode === "custom" && !customCover.trim()) {
+      setNotice("Write the visible text you want to use.");
+      setHideStep(2);
+      return;
+    }
+
     setBusy(true);
     setNotice("");
     setCopied(false);
-    setAnnouncement("Creating visible text and hiding your message inside it.");
+    setAnnouncement(
+      coverMode === "custom"
+        ? "Hiding your message inside the visible text you wrote."
+        : "Creating visible text and hiding your message inside it.",
+    );
 
     try {
+      const coverPromise = coverMode === "custom"
+        ? Promise.resolve(customCover)
+        : generateCover();
+
       const [cover, packet] = await Promise.all([
-        generateCover(),
+        coverPromise,
         createPacket(secret, password || undefined),
       ]);
       const invisiblePayload = bytesToInvisible(packet);
@@ -283,13 +286,14 @@ export default function Home() {
     }
     setNotice("");
     setHideStep(2);
-    setAnnouncement("Message entered. Choose how the visible text should look.");
+    setAnnouncement("Message entered. Choose the visible text.");
   }
 
   function resetHide() {
     setSecret("");
     setPassword("");
-    setCoverStyle("auto");
+    setCoverMode("automatic");
+    setCustomCover("");
     setOutput("");
     setCopied(false);
     setNotice("");
@@ -377,23 +381,49 @@ export default function Home() {
               <section className="terminal-step" aria-labelledby="hide-step-two-title">
                 <div className="step-heading">
                   <p className="step-kicker">Hide · 02/03</p>
-                  <h2 id="hide-step-two-title">Choose the disguise.</h2>
-                  <p className="step-intro">Pick how the visible sentence should feel. Add a password if you also want encryption.</p>
+                  <h2 id="hide-step-two-title">Choose the outside.</h2>
+                  <p className="step-intro">Let plaintext write the visible text automatically, or type exactly what you want people to see.</p>
                 </div>
 
                 <form className="step-form" onSubmit={(event) => { event.preventDefault(); void handleHide(); }}>
-                  <label className="select-field" htmlFor="cover-style">
-                    <span className="field-topline"><span>Visible style</span><span>{selectedCoverStyle.hint}</span></span>
-                    <select
-                      id="cover-style"
-                      value={coverStyle}
-                      onChange={(event) => setCoverStyle(event.target.value as CoverStyle)}
-                    >
-                      {COVER_STYLES.map((style) => (
-                        <option key={style.value} value={style.value}>{style.label}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div className="cover-mode-field">
+                    <div className="field-topline">
+                      <span>Visible text</span>
+                      <span>{coverMode === "automatic" ? "Generated for you" : "Exactly as written"}</span>
+                    </div>
+                    <div className="cover-mode-switch" role="group" aria-label="Choose visible text source">
+                      <button
+                        className={coverMode === "automatic" ? "active" : ""}
+                        type="button"
+                        onClick={() => { setCoverMode("automatic"); setNotice(""); }}
+                        aria-pressed={coverMode === "automatic"}
+                      >
+                        Automatic
+                      </button>
+                      <button
+                        className={coverMode === "custom" ? "active" : ""}
+                        type="button"
+                        onClick={() => { setCoverMode("custom"); setNotice(""); }}
+                        aria-pressed={coverMode === "custom"}
+                      >
+                        My text
+                      </button>
+                    </div>
+                  </div>
+
+                  {coverMode === "custom" && (
+                    <label className="editor-field custom-cover-field" htmlFor="custom-cover-input">
+                      <span className="editor-meta"><span>What people will see</span><span>{customCover.length}</span></span>
+                      <textarea
+                        id="custom-cover-input"
+                        value={customCover}
+                        onChange={(event) => setCustomCover(event.target.value)}
+                        placeholder="Dinner moved to 8. I’ll meet you there."
+                        spellCheck={false}
+                        autoFocus
+                      />
+                    </label>
+                  )}
 
                   <label className="password-field">
                     <span className="field-topline"><span>Password</span><span>Optional</span></span>
@@ -411,7 +441,7 @@ export default function Home() {
 
                   <div className="form-actions split-actions">
                     <button className="text-action" type="button" onClick={() => { setNotice(""); setHideStep(1); }}>Back</button>
-                    <button className="primary-action" type="submit" disabled={busy}>{busy ? "Preparing…" : "Hide message"}</button>
+                    <button className="primary-action" type="submit" disabled={busy || (coverMode === "custom" && !customCover.trim())}>{busy ? "Preparing…" : "Hide message"}</button>
                   </div>
                 </form>
               </section>
@@ -435,7 +465,9 @@ export default function Home() {
                 <div className="result-actions">
                   <button className="text-action" type="button" onClick={() => { setNotice(""); setHideStep(2); }}>Back</button>
                   <div className="result-main-actions">
-                    <button className="secondary-action" type="button" onClick={() => void handleHide()} disabled={busy}>{busy ? "Preparing…" : "Again"}</button>
+                    {coverMode === "automatic" && (
+                      <button className="secondary-action" type="button" onClick={() => void handleHide()} disabled={busy}>{busy ? "Preparing…" : "Again"}</button>
+                    )}
                     <button className="primary-action" type="button" onClick={copyOutput}>{copied ? "Copied" : "Copy"}</button>
                   </div>
                 </div>
