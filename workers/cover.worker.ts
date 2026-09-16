@@ -1,7 +1,6 @@
 import { pipeline } from "@huggingface/transformers";
 
 const MODEL_ID = "onnx-community/LFM2.5-350M-ONNX";
-const DEFAULT_CACHE_TARGET = 2;
 const MAX_RECENT_COVERS = 80;
 const MAX_GENERATION_ATTEMPTS = 4;
 const MIN_ACCEPTABLE_QUALITY = 62;
@@ -55,9 +54,6 @@ let hasTotalProgress = false;
 let processingTasks = false;
 
 const foregroundTasks: Array<() => Promise<void>> = [];
-const backgroundTasks: Array<() => Promise<void>> = [];
-const coverCache = new Map<string, string[]>();
-const primingCounts = new Map<string, number>();
 const recentCovers: string[] = [];
 
 function post(type: string, payload: Record<string, unknown> = {}) {
@@ -401,8 +397,8 @@ async function processTaskQueue() {
   processingTasks = true;
 
   try {
-    while (foregroundTasks.length > 0 || backgroundTasks.length > 0) {
-      const task = foregroundTasks.shift() ?? backgroundTasks.shift();
+    while (foregroundTasks.length > 0) {
+      const task = foregroundTasks.shift();
       if (task) {
         await task();
       }
@@ -412,7 +408,7 @@ async function processTaskQueue() {
   }
 }
 
-function enqueueTask<T>(priority: "foreground" | "background", task: () => Promise<T>) {
+function enqueueTask<T>(task: () => Promise<T>) {
   return new Promise<T>((resolve, reject) => {
     const wrapped = async () => {
       try {
@@ -422,72 +418,9 @@ function enqueueTask<T>(priority: "foreground" | "background", task: () => Promi
       }
     };
 
-    if (priority === "foreground") {
-      foregroundTasks.push(wrapped);
-    } else {
-      backgroundTasks.push(wrapped);
-    }
-
+    foregroundTasks.push(wrapped);
     void processTaskQueue();
   });
-}
-
-function getCachedCover(cacheKey: string) {
-  const cached = coverCache.get(cacheKey);
-  if (!cached?.length) {
-    return null;
-  }
-
-  const value = cached.shift() ?? null;
-  if (cached.length === 0) {
-    coverCache.delete(cacheKey);
-  }
-  return value;
-}
-
-function addCachedCover(cacheKey: string, text: string) {
-  if (!text) {
-    return;
-  }
-
-  const cached = coverCache.get(cacheKey) ?? [];
-  if (!cached.some((value) => normalizeCover(value) === normalizeCover(text))) {
-    cached.push(text);
-    coverCache.set(cacheKey, cached);
-  }
-}
-
-function schedulePrime(
-  cacheKey: string,
-  prompt: string,
-  language: CoverLanguage,
-  target = DEFAULT_CACHE_TARGET,
-) {
-  const cachedCount = coverCache.get(cacheKey)?.length ?? 0;
-  const primingCount = primingCounts.get(cacheKey) ?? 0;
-  const needed = Math.max(0, target - cachedCount - primingCount);
-
-  for (let index = 0; index < needed; index += 1) {
-    primingCounts.set(cacheKey, (primingCounts.get(cacheKey) ?? 0) + 1);
-
-    void enqueueTask("background", async () => {
-      try {
-        const text = await generateUniqueText(prompt, false, language);
-        addCachedCover(cacheKey, text);
-        post("primed", {
-          cacheKey,
-          count: coverCache.get(cacheKey)?.length ?? 0,
-        });
-      } finally {
-        const remaining = Math.max(0, (primingCounts.get(cacheKey) ?? 1) - 1);
-        if (remaining === 0) {
-          primingCounts.delete(cacheKey);
-        } else {
-          primingCounts.set(cacheKey, remaining);
-        }
-      }
-    }).catch(() => undefined);
-  }
 }
 
 function safeLanguage(value: unknown): CoverLanguage {
@@ -500,23 +433,9 @@ function safeLanguage(value: unknown): CoverLanguage {
 self.onmessage = async (event: MessageEvent) => {
   const message = event.data;
 
-  if (message?.type === "load") {
-    try {
-      await getGenerator();
-    } catch (error) {
-      post("error", {
-        requestId: message.requestId,
-        message: error instanceof Error ? error.message : "Unable to prepare the text engine.",
-      });
-    }
-    return;
-  }
-
-  if (message?.type === "prime") {
-    if (typeof message.cacheKey === "string" && typeof message.prompt === "string") {
-      const target = typeof message.target === "number" ? Math.max(1, Math.floor(message.target)) : DEFAULT_CACHE_TARGET;
-      schedulePrime(message.cacheKey, message.prompt, safeLanguage(message.language), target);
-    }
+  // Startup must stay cheap and stable. The model is loaded lazily only when the
+  // user explicitly asks plaintext to generate visible text.
+  if (message?.type === "load" || message?.type === "prime") {
     return;
   }
 
@@ -525,27 +444,14 @@ self.onmessage = async (event: MessageEvent) => {
   }
 
   const language = safeLanguage(message.language);
-  const cacheKey = typeof message.cacheKey === "string" ? message.cacheKey : `auto:${language}`;
-  const cached = getCachedCover(cacheKey);
-
-  if (cached) {
-    post("generated", {
-      requestId: message.requestId,
-      text: cached,
-      cached: true,
-    });
-    schedulePrime(cacheKey, message.prompt, language, DEFAULT_CACHE_TARGET);
-    return;
-  }
 
   try {
-    const text = await enqueueTask("foreground", () => generateUniqueText(message.prompt, true, language));
+    const text = await enqueueTask(() => generateUniqueText(message.prompt, true, language));
     post("generated", {
       requestId: message.requestId,
       text,
       cached: false,
     });
-    schedulePrime(cacheKey, message.prompt, language, DEFAULT_CACHE_TARGET);
   } catch (error) {
     post("error", {
       requestId: message.requestId,
