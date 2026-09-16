@@ -1,27 +1,35 @@
-const CURRENT_ALPHABET = ["\u200D", "\u200C", "\u2060", "\u2063"] as const;
+const CURRENT_ALPHABET = ["\u2061", "\u2062", "\u2063", "\u2064"] as const;
+const PREVIOUS_ALPHABET = ["\u200D", "\u200C", "\u2060", "\u2063"] as const;
 const LEGACY_ALPHABET = ["\u200B", "\u200C", "\u2060", "\u2063"] as const;
-const ALL_ALPHABET_SET = new Set<string>([...CURRENT_ALPHABET, ...LEGACY_ALPHABET]);
+const PACKET_MAGIC = new Uint8Array([80, 76, 84, 88]);
 
-export function stripInvisiblePayload(text: string) {
-  return Array.from(text)
-    .filter((character) => !ALL_ALPHABET_SET.has(character))
-    .join("");
+const ALPHABETS = [CURRENT_ALPHABET, PREVIOUS_ALPHABET, LEGACY_ALPHABET] as const;
+
+function alphabetSet(alphabet: readonly string[]) {
+  return new Set<string>(alphabet);
 }
 
-export function bytesToInvisible(bytes: Uint8Array) {
-  let output = "";
-  for (const byte of bytes) {
-    output += CURRENT_ALPHABET[(byte >> 6) & 3];
-    output += CURRENT_ALPHABET[(byte >> 4) & 3];
-    output += CURRENT_ALPHABET[(byte >> 2) & 3];
-    output += CURRENT_ALPHABET[byte & 3];
+function symbolsForAlphabet(text: string, alphabet: readonly string[]) {
+  const set = alphabetSet(alphabet);
+  return Array.from(text).filter((character) => set.has(character));
+}
+
+function startsWithPacketMagic(bytes: Uint8Array) {
+  if (bytes.length < PACKET_MAGIC.length) {
+    return false;
   }
-  return output;
+
+  for (let index = 0; index < PACKET_MAGIC.length; index += 1) {
+    if (bytes[index] !== PACKET_MAGIC[index]) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function decodeWithAlphabet(text: string, alphabet: readonly string[]) {
-  const alphabetSet = new Set<string>(alphabet);
-  const symbols = Array.from(text).filter((character) => alphabetSet.has(character));
+  const symbols = symbolsForAlphabet(text, alphabet);
   if (symbols.length < 4) {
     throw new Error("No hidden message found.");
   }
@@ -45,16 +53,68 @@ function decodeWithAlphabet(text: string, alphabet: readonly string[]) {
   return bytes;
 }
 
+function detectPayloadAlphabet(text: string) {
+  for (const alphabet of ALPHABETS) {
+    try {
+      const bytes = decodeWithAlphabet(text, alphabet);
+      if (startsWithPacketMagic(bytes)) {
+        return alphabet;
+      }
+    } catch {
+      // Try the next historical alphabet.
+    }
+  }
+
+  return null;
+}
+
+export function stripInvisiblePayload(text: string) {
+  const detected = detectPayloadAlphabet(text);
+  if (!detected) {
+    return text;
+  }
+
+  const set = alphabetSet(detected);
+  return Array.from(text)
+    .filter((character) => !set.has(character))
+    .join("");
+}
+
+export function bytesToInvisible(bytes: Uint8Array) {
+  let output = "";
+  for (const byte of bytes) {
+    output += CURRENT_ALPHABET[(byte >> 6) & 3];
+    output += CURRENT_ALPHABET[(byte >> 4) & 3];
+    output += CURRENT_ALPHABET[(byte >> 2) & 3];
+    output += CURRENT_ALPHABET[byte & 3];
+  }
+  return output;
+}
+
 export function invisibleToBytes(text: string) {
+  const detected = detectPayloadAlphabet(text);
+  if (detected) {
+    return decodeWithAlphabet(text, detected);
+  }
+
   const characters = Array.from(text);
-  const hasCurrentMarker = characters.includes(CURRENT_ALPHABET[0]);
+  const hasCurrentSymbols = characters.some((character) => CURRENT_ALPHABET.includes(character as (typeof CURRENT_ALPHABET)[number]));
+  const hasPreviousMarker = characters.includes(PREVIOUS_ALPHABET[0]);
   const hasLegacyMarker = characters.includes(LEGACY_ALPHABET[0]);
 
-  if (hasLegacyMarker && !hasCurrentMarker) {
+  if (hasCurrentSymbols) {
+    return decodeWithAlphabet(text, CURRENT_ALPHABET);
+  }
+
+  if (hasLegacyMarker && !hasPreviousMarker) {
     return decodeWithAlphabet(text, LEGACY_ALPHABET);
   }
 
-  return decodeWithAlphabet(text, CURRENT_ALPHABET);
+  if (hasPreviousMarker) {
+    return decodeWithAlphabet(text, PREVIOUS_ALPHABET);
+  }
+
+  throw new Error("No hidden message found.");
 }
 
 export function embedInvisiblePayload(coverText: string, payload: string) {
@@ -107,5 +167,9 @@ export function embedInvisiblePayload(coverText: string, payload: string) {
 }
 
 export function countHiddenCharacters(text: string) {
-  return Array.from(text).filter((character) => ALL_ALPHABET_SET.has(character)).length;
+  const detected = detectPayloadAlphabet(text);
+  if (!detected) {
+    return 0;
+  }
+  return symbolsForAlphabet(text, detected).length;
 }
