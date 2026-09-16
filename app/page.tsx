@@ -303,7 +303,7 @@ export default function Home() {
       <section className="terminal" aria-label="Hide or reveal a hidden message" aria-busy={busy}>
         <div className="terminal-bar">
           <div className="terminal-dots" aria-hidden="true"><span /><span /><span /></div>
-          <span className="terminal-title" aria-hidden="true">plaintext.local</span>
+          <span className="terminal-title" aria-hidden="true">plaintext.fun</span>
           <div className="mode-switch" role="group" aria-label="Choose what you want to do">
             <button className={mode === "hide" ? "active" : ""} onClick={() => switchMode("hide")} type="button" aria-pressed={mode === "hide"}>hide</button>
             <button className={mode === "reveal" ? "active" : ""} onClick={() => switchMode("reveal")} type="button" aria-pressed={mode === "reveal"}>reveal</button>
@@ -438,7 +438,7 @@ export default function Home() {
 
         <div className="terminal-statusbar" aria-hidden="true">
           <span>{modelMessage}</span>
-          <span>secret processed in browser</span>
+          <span>plaintext.fun / secret processed in browser</span>
         </div>
       </section>
     </main>
