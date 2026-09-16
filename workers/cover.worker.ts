@@ -6,18 +6,21 @@ const MAX_RECENT_COVERS = 80;
 const MAX_GENERATION_ATTEMPTS = 4;
 const MIN_ACCEPTABLE_QUALITY = 62;
 
+type CoverLanguage = "en" | "bn" | "hi" | "es" | "fr" | "de" | "ar";
+
 const SYSTEM_PROMPT = [
-  "You write realistic one-sentence English messages that could genuinely be sent by a person.",
-  "Prefer ordinary phrasing, simple syntax, concrete details, and natural contractions.",
-  "Do not sound like an assistant, storyteller, copywriter, or creative-writing exercise.",
-  "Do not add commentary, labels, explanations, quotation marks, or multiple options.",
+  "You write realistic one-sentence messages that could genuinely be sent by a person.",
+  "Always write in the target language requested by the user.",
+  "Prefer ordinary phrasing, simple syntax, concrete details, and natural everyday language.",
+  "Do not sound like an assistant, storyteller, copywriter, translation exercise, or creative-writing exercise.",
+  "Do not add commentary, labels, explanations, quotation marks, translations, or multiple options.",
   "Return only the message.",
 ].join(" ");
 
 const variationDirections = [
   "Keep the syntax simple and direct.",
   "Lead with the practical detail rather than background context.",
-  "Use a contraction if one fits naturally.",
+  "Use the kind of phrasing a native speaker would use in a quick message.",
   "Write it like a message typed quickly on a phone.",
   "Keep the tone matter-of-fact and understated.",
   "Prefer concrete nouns and verbs over descriptive language.",
@@ -45,7 +48,7 @@ const unnaturalPhrases = [
 ];
 
 const forbiddenContent = /\b(secret|secrets|hidden|hiding|hide|encryption|encrypted|encrypt|password|passwords|steganography|model|models|artificial intelligence|\bai\b)\b/i;
-const assistantOpening = /^(sure|certainly|absolutely|of course|here(?:'s| is)|the sentence|message:|sentence:|output:)/i;
+const assistantOpening = /^(sure|certainly|absolutely|of course|here(?:'s| is)|the sentence|message:|sentence:|output:|translation:)/i;
 
 let generatorPromise: Promise<any> | null = null;
 let hasTotalProgress = false;
@@ -59,16 +62,6 @@ const recentCovers: string[] = [];
 
 function post(type: string, payload: Record<string, unknown> = {}) {
   self.postMessage({ type, ...payload });
-}
-
-function randomIndex(length: number) {
-  const value = new Uint32Array(1);
-  crypto.getRandomValues(value);
-  return value[0] % length;
-}
-
-function pick<T>(items: readonly T[]) {
-  return items[randomIndex(items.length)];
 }
 
 async function getGenerator() {
@@ -137,14 +130,14 @@ function cleanCandidate(value: string) {
     .replace(/^['\"]|['\"]$/g, "")
     .replace(/\s+/g, " ")
     .trim()
-    .split(/(?<=[.!?])\s+/)[0]
+    .split(/(?<=[.!?।؟])\s+/u)[0]
     .trim();
 }
 
 function normalizeCover(value: string) {
   return value
-    .toLowerCase()
-    .replace(/[^a-z0-9'\s]/g, " ")
+    .toLocaleLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}'’\s]/gu, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -237,11 +230,44 @@ function hasRepeatedAdjacentWord(candidate: string) {
   return false;
 }
 
-function naturalnessScore(candidate: string) {
+function requestedScriptRatio(candidate: string, language: CoverLanguage) {
+  const letters = Array.from(candidate).filter((character) => /\p{L}/u.test(character));
+  if (letters.length === 0) {
+    return 0;
+  }
+
+  let scriptPattern: RegExp;
+  if (language === "bn") {
+    scriptPattern = /[\u0980-\u09FF]/u;
+  } else if (language === "hi") {
+    scriptPattern = /[\u0900-\u097F]/u;
+  } else if (language === "ar") {
+    scriptPattern = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/u;
+  } else {
+    scriptPattern = /[A-Za-zÀ-ÖØ-öø-ÿĀ-ž]/u;
+  }
+
+  const matching = letters.filter((character) => scriptPattern.test(character)).length;
+  return matching / letters.length;
+}
+
+function matchesRequestedLanguage(candidate: string, language: CoverLanguage) {
+  const ratio = requestedScriptRatio(candidate, language);
+  if (language === "bn" || language === "hi" || language === "ar") {
+    return ratio >= 0.7;
+  }
+  return ratio >= 0.78;
+}
+
+function naturalnessScore(candidate: string, language: CoverLanguage) {
   const normalized = normalizeCover(candidate);
   const wordCount = words(candidate).length;
 
-  if (!candidate || wordCount < 7 || wordCount > 30) {
+  if (!candidate || wordCount < 5 || wordCount > 34) {
+    return 0;
+  }
+
+  if (!matchesRequestedLanguage(candidate, language)) {
     return 0;
   }
 
@@ -253,37 +279,41 @@ function naturalnessScore(candidate: string) {
     return 0;
   }
 
-  const sentenceEndings = candidate.match(/[.!?](?=\s|$)/g)?.length ?? 0;
+  const sentenceEndings = candidate.match(/[.!?।؟](?=\s|$)/gu)?.length ?? 0;
   if (sentenceEndings > 1) {
     return 0;
   }
 
   let score = 100;
 
-  if (wordCount < 9) score -= (9 - wordCount) * 4;
-  if (wordCount > 22) score -= (wordCount - 22) * 3;
+  if (wordCount < 8) score -= (8 - wordCount) * 4;
+  if (wordCount > 24) score -= (wordCount - 24) * 3;
 
-  for (const phrase of unnaturalPhrases) {
-    if (normalized.includes(phrase)) {
-      score -= 16;
+  if (language === "en") {
+    for (const phrase of unnaturalPhrases) {
+      if (normalized.includes(phrase)) {
+        score -= 16;
+      }
     }
   }
 
-  const commaCount = (candidate.match(/,/g) ?? []).length;
+  const commaCount = (candidate.match(/[,،]/g) ?? []).length;
   if (commaCount > 2) score -= (commaCount - 2) * 7;
 
   if (/[;:]/.test(candidate)) score -= 8;
   if (/[—–]/.test(candidate)) score -= 10;
   if (/\([^)]{3,}\)/.test(candidate)) score -= 8;
-  if (/\b(really|very|quite|rather)\b.*\b(really|very|quite|rather)\b/i.test(candidate)) score -= 7;
-  if (/\b(which|that)\b.{0,28}\b(which|that)\b/i.test(candidate)) score -= 5;
-  if (/\b(i think|i feel like|i have to say|to be honest|honestly)\b/i.test(candidate)) score -= 10;
 
-  if (/\b(can't|won't|didn't|isn't|it's|i'm|i've|we're|that's|there's|you'll|i'll)\b/i.test(candidate)) {
-    score += 3;
+  if (language === "en") {
+    if (/\b(really|very|quite|rather)\b.*\b(really|very|quite|rather)\b/i.test(candidate)) score -= 7;
+    if (/\b(which|that)\b.{0,28}\b(which|that)\b/i.test(candidate)) score -= 5;
+    if (/\b(i think|i feel like|i have to say|to be honest|honestly)\b/i.test(candidate)) score -= 10;
+    if (/\b(can't|won't|didn't|isn't|it's|i'm|i've|we're|that's|there's|you'll|i'll)\b/i.test(candidate)) {
+      score += 3;
+    }
   }
 
-  if (/[.!?]$/.test(candidate)) score += 2;
+  if (/[.!?।؟]$/u.test(candidate)) score += 2;
 
   return Math.max(0, Math.min(105, score));
 }
@@ -296,7 +326,7 @@ function buildAttemptPrompt(basePrompt: string, attempt: number) {
   ].join("\n");
 }
 
-async function generateUniqueText(prompt: string, announce: boolean) {
+async function generateUniqueText(prompt: string, announce: boolean, language: CoverLanguage) {
   const generator = await getGenerator();
 
   if (announce) {
@@ -316,7 +346,7 @@ async function generateUniqueText(prompt: string, announce: boolean) {
           { role: "user", content: buildAttemptPrompt(prompt, attempt) },
         ],
         {
-          max_new_tokens: 48,
+          max_new_tokens: language === "en" ? 48 : 72,
           do_sample: true,
           temperature: temperatures[Math.min(attempt, temperatures.length - 1)],
           top_p: 0.92,
@@ -330,7 +360,7 @@ async function generateUniqueText(prompt: string, announce: boolean) {
         continue;
       }
 
-      const quality = naturalnessScore(candidate);
+      const quality = naturalnessScore(candidate, language);
       if (quality === 0) {
         continue;
       }
@@ -355,7 +385,7 @@ async function generateUniqueText(prompt: string, announce: boolean) {
       return bestCandidate;
     }
 
-    throw new Error("The text engine could not produce a natural sentence.");
+    throw new Error("The text engine could not produce a natural sentence in the selected language.");
   } finally {
     if (announce) {
       post("status", { status: "ready", message: "Text engine ready" });
@@ -427,7 +457,12 @@ function addCachedCover(cacheKey: string, text: string) {
   }
 }
 
-function schedulePrime(cacheKey: string, prompt: string, target = DEFAULT_CACHE_TARGET) {
+function schedulePrime(
+  cacheKey: string,
+  prompt: string,
+  language: CoverLanguage,
+  target = DEFAULT_CACHE_TARGET,
+) {
   const cachedCount = coverCache.get(cacheKey)?.length ?? 0;
   const primingCount = primingCounts.get(cacheKey) ?? 0;
   const needed = Math.max(0, target - cachedCount - primingCount);
@@ -437,7 +472,7 @@ function schedulePrime(cacheKey: string, prompt: string, target = DEFAULT_CACHE_
 
     void enqueueTask("background", async () => {
       try {
-        const text = await generateUniqueText(prompt, false);
+        const text = await generateUniqueText(prompt, false, language);
         addCachedCover(cacheKey, text);
         post("primed", {
           cacheKey,
@@ -453,6 +488,13 @@ function schedulePrime(cacheKey: string, prompt: string, target = DEFAULT_CACHE_
       }
     }).catch(() => undefined);
   }
+}
+
+function safeLanguage(value: unknown): CoverLanguage {
+  if (value === "bn" || value === "hi" || value === "es" || value === "fr" || value === "de" || value === "ar") {
+    return value;
+  }
+  return "en";
 }
 
 self.onmessage = async (event: MessageEvent) => {
@@ -473,7 +515,7 @@ self.onmessage = async (event: MessageEvent) => {
   if (message?.type === "prime") {
     if (typeof message.cacheKey === "string" && typeof message.prompt === "string") {
       const target = typeof message.target === "number" ? Math.max(1, Math.floor(message.target)) : DEFAULT_CACHE_TARGET;
-      schedulePrime(message.cacheKey, message.prompt, target);
+      schedulePrime(message.cacheKey, message.prompt, safeLanguage(message.language), target);
     }
     return;
   }
@@ -482,7 +524,8 @@ self.onmessage = async (event: MessageEvent) => {
     return;
   }
 
-  const cacheKey = typeof message.cacheKey === "string" ? message.cacheKey : "auto";
+  const language = safeLanguage(message.language);
+  const cacheKey = typeof message.cacheKey === "string" ? message.cacheKey : `auto:${language}`;
   const cached = getCachedCover(cacheKey);
 
   if (cached) {
@@ -491,18 +534,18 @@ self.onmessage = async (event: MessageEvent) => {
       text: cached,
       cached: true,
     });
-    schedulePrime(cacheKey, message.prompt, DEFAULT_CACHE_TARGET);
+    schedulePrime(cacheKey, message.prompt, language, DEFAULT_CACHE_TARGET);
     return;
   }
 
   try {
-    const text = await enqueueTask("foreground", () => generateUniqueText(message.prompt, true));
+    const text = await enqueueTask("foreground", () => generateUniqueText(message.prompt, true, language));
     post("generated", {
       requestId: message.requestId,
       text,
       cached: false,
     });
-    schedulePrime(cacheKey, message.prompt, DEFAULT_CACHE_TARGET);
+    schedulePrime(cacheKey, message.prompt, language, DEFAULT_CACHE_TARGET);
   } catch (error) {
     post("error", {
       requestId: message.requestId,
