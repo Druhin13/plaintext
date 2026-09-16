@@ -8,12 +8,22 @@ import { bytesToInvisible, countHiddenCharacters, embedInvisiblePayload, invisib
 
 type Mode = "hide" | "reveal";
 type ModelState = "idle" | "loading" | "ready" | "generating" | "error";
+type Step = 1 | 2 | 3;
 
 type PendingGeneration = {
   id: string;
   resolve: (value: string) => void;
   reject: (error: Error) => void;
 };
+
+const COVER_STYLES: Array<{ value: CoverStyle; label: string; hint: string }> = [
+  { value: "auto", label: "automatic", hint: "best fit" },
+  { value: "casual", label: "casual", hint: "everyday" },
+  { value: "work", label: "work", hint: "professional" },
+  { value: "friendly", label: "friendly", hint: "warm" },
+  { value: "story", label: "story", hint: "narrative" },
+  { value: "random", label: "random", hint: "surprise me" },
+];
 
 function makeId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -41,6 +51,8 @@ function friendlyRevealError(error: unknown) {
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("hide");
+  const [hideStep, setHideStep] = useState<Step>(1);
+  const [revealStep, setRevealStep] = useState<Step>(1);
   const [secret, setSecret] = useState("");
   const [password, setPassword] = useState("");
   const [coverStyle, setCoverStyle] = useState<CoverStyle>("auto");
@@ -60,6 +72,7 @@ export default function Home() {
   const pendingRef = useRef<PendingGeneration | null>(null);
 
   const revealHiddenCount = useMemo(() => countHiddenCharacters(revealInput), [revealInput]);
+  const currentStep = mode === "hide" ? hideStep : revealStep;
 
   const modelStatusLabel = useMemo(() => {
     if (modelState === "loading") return "loading local AI";
@@ -70,7 +83,7 @@ export default function Home() {
   }, [modelState]);
 
   const revealInputStatus = useMemo(() => {
-    if (!revealInput) return "paste full text";
+    if (!revealInput) return "waiting for text";
     if (revealHiddenCount > 0) return "hidden data detected";
     return "no hidden data detected";
   }, [revealHiddenCount, revealInput]);
@@ -185,6 +198,7 @@ export default function Home() {
   async function handleHide() {
     if (!secret.trim()) {
       setNotice("Enter the message you want to hide.");
+      setHideStep(1);
       return;
     }
 
@@ -201,6 +215,7 @@ export default function Home() {
       const invisiblePayload = bytesToInvisible(packet);
       const result = embedInvisiblePayload(cover, invisiblePayload);
       setOutput(result);
+      setHideStep(3);
       setAnnouncement("Your message is hidden. The generated text is ready to copy.");
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not hide the message.";
@@ -214,6 +229,7 @@ export default function Home() {
   async function handleReveal() {
     if (!revealInput.trim()) {
       setNotice("Paste the full generated text first.");
+      setRevealStep(1);
       return;
     }
 
@@ -229,11 +245,13 @@ export default function Home() {
       const result = await revealPacket(packet, revealPassword || undefined);
       setRevealedSecret(result);
       setNeedsPassword(false);
+      setRevealStep(3);
       setAnnouncement("Hidden message revealed.");
     } catch (error) {
       if (error instanceof Error && error.message === "PASSWORD_REQUIRED") {
         setNeedsPassword(true);
-        setNotice("This hidden message is password-protected. Enter the password, then reveal it again.");
+        setRevealStep(2);
+        setNotice("");
         setAnnouncement("A password is required to reveal this hidden message.");
       } else {
         const message = friendlyRevealError(error);
@@ -268,28 +286,49 @@ export default function Home() {
     setAnnouncement(`${nextMode === "hide" ? "Hide" : "Reveal"} mode selected.`);
   }
 
-  function submitHide(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void handleHide();
+  function continueHide() {
+    if (!secret.trim()) {
+      setNotice("Enter the message you want to hide.");
+      return;
+    }
+    setNotice("");
+    setHideStep(2);
+    setAnnouncement("Message entered. Choose how the generated text should work.");
   }
 
-  function submitReveal(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void handleReveal();
+  function resetHide() {
+    setSecret("");
+    setPassword("");
+    setCoverStyle("auto");
+    setOutput("");
+    setCopied(false);
+    setNotice("");
+    setHideStep(1);
+  }
+
+  function resetReveal() {
+    setRevealInput("");
+    setRevealPassword("");
+    setRevealedSecret("");
+    setNeedsPassword(false);
+    setNotice("");
+    setRevealStep(1);
   }
 
   const progressValue = Math.max(0, Math.min(100, modelProgress));
+  const stepLabels = mode === "hide"
+    ? ["write", "configure", "share"]
+    : ["paste", "unlock", "read"];
 
   return (
     <main className="app-shell">
-      <h1 className="sr-only">plaintext — hide a message inside ordinary-looking text or reveal one</h1>
+      <h1 className="sr-only">plaintext.fun — hide a message inside ordinary-looking text or reveal one</h1>
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">{announcement}</div>
 
       <header className="app-nav">
-        <Link className="brand" href="/" aria-label="plaintext home">
+        <Link className="brand" href="/" aria-label="plaintext.fun home">
           <span className="brand-prompt" aria-hidden="true">$</span>
-          <span>plaintext</span>
-          <span className="brand-cursor" aria-hidden="true">_</span>
+          <span>plaintext.fun</span>
         </Link>
         <div className="nav-actions">
           <div className="model-status" role="status" aria-live="polite" aria-atomic="true" title={modelMessage}>
@@ -300,10 +339,9 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="terminal" aria-label="Hide or reveal a hidden message" aria-busy={busy}>
-        <div className="terminal-bar">
-          <div className="terminal-dots" aria-hidden="true"><span /><span /><span /></div>
-          <span className="terminal-title" aria-hidden="true">plaintext.fun</span>
+      <section className="wizard" aria-label="Hide or reveal a hidden message" aria-busy={busy}>
+        <div className="wizard-chrome">
+          <div className="session-id"><span>session</span><strong>plaintext.fun</strong></div>
           <div className="mode-switch" role="group" aria-label="Choose what you want to do">
             <button className={mode === "hide" ? "active" : ""} onClick={() => switchMode("hide")} type="button" aria-pressed={mode === "hide"}>hide</button>
             <button className={mode === "reveal" ? "active" : ""} onClick={() => switchMode("reveal")} type="button" aria-pressed={mode === "reveal"}>reveal</button>
@@ -324,119 +362,235 @@ export default function Home() {
           </div>
         )}
 
-        {mode === "hide" ? (
-          <div className="terminal-body">
-            <div className="command-line" aria-hidden="true"><span className="prompt">$</span><span>plaintext hide</span></div>
-            <h2 className="sr-only">Hide a message</h2>
+        <ol className="stepper" aria-label={`${mode} progress`}>
+          {stepLabels.map((label, index) => {
+            const step = (index + 1) as Step;
+            const state = step < currentStep ? "done" : step === currentStep ? "current" : "upcoming";
+            return (
+              <li key={label} className={state} aria-current={state === "current" ? "step" : undefined}>
+                <span className="step-number">0{step}</span>
+                <span className="step-label">{label}</span>
+              </li>
+            );
+          })}
+        </ol>
 
-            <form className="terminal-form" onSubmit={submitHide} aria-busy={busy}>
-              <div className="terminal-field">
-                <div className="field-topline">
-                  <label className="field-label" htmlFor="secret-input">message to hide</label>
-                  <span className="field-meta" id="secret-count">{secret.length} chars</span>
-                </div>
-                <textarea
-                  id="secret-input"
-                  value={secret}
-                  onChange={(event) => setSecret(event.target.value)}
-                  placeholder="type the message you want to hide…"
-                  spellCheck={false}
-                  aria-describedby="secret-count"
-                />
+        <div className="step-stage">
+          {mode === "hide" && hideStep === 1 && (
+            <section className="step-card" aria-labelledby="hide-step-one-title">
+              <div className="step-copy">
+                <span className="step-kicker">01 / write</span>
+                <h2 id="hide-step-one-title">What do you want to hide?</h2>
+                <p>Type the message exactly as you want it to come back later. It stays in your browser.</p>
               </div>
 
-              <div className="option-row">
-                <label>
-                  <span>password <em>optional · encrypts</em></span>
-                  <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="leave blank for no encryption" autoComplete="new-password" />
-                </label>
-                <label>
-                  <span>visible text style</span>
-                  <select value={coverStyle} onChange={(event) => setCoverStyle(event.target.value as CoverStyle)}>
-                    <option value="auto">automatic</option>
-                    <option value="casual">casual</option>
-                    <option value="work">work</option>
-                    <option value="friendly">friendly</option>
-                    <option value="story">story</option>
-                    <option value="random">random</option>
-                  </select>
-                </label>
-              </div>
-
-              <button className="run-button" type="submit" disabled={busy || !secret.trim()}>
-                <span>{busy ? "hiding message…" : "hide message"}</span>
-                <span aria-hidden="true">↵</span>
-              </button>
-            </form>
-
-            {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
-
-            <section className={`terminal-output ${output ? "has-output" : ""}`} aria-labelledby="hide-output-heading">
-              <div className="output-heading">
-                <span id="hide-output-heading">text to copy</span>
-                <span>{output ? "ready" : "waiting"}</span>
-              </div>
-              {output ? (
-                <>
-                  <div className="output-copy">{output}</div>
-                  <div className="output-actions">
-                    <button type="button" onClick={copyOutput}>{copied ? "copied ✓" : "copy text"}</button>
-                    <button type="button" onClick={handleHide} disabled={busy}>generate another</button>
+              <form onSubmit={(event) => { event.preventDefault(); continueHide(); }}>
+                <div className="terminal-field light-field">
+                  <div className="field-topline">
+                    <label className="field-label" htmlFor="secret-input">message</label>
+                    <span className="field-meta" id="secret-count">{secret.length} chars</span>
                   </div>
-                </>
-              ) : (
-                <div className="output-empty"><span>generated text will appear here</span></div>
-              )}
-            </section>
-          </div>
-        ) : (
-          <div className="terminal-body">
-            <div className="command-line" aria-hidden="true"><span className="prompt">$</span><span>plaintext reveal</span></div>
-            <h2 className="sr-only">Reveal a hidden message</h2>
-
-            <form className="terminal-form" onSubmit={submitReveal} aria-busy={busy}>
-              <div className="terminal-field">
-                <div className="field-topline">
-                  <label className="field-label" htmlFor="reveal-input">text to inspect</label>
-                  <span className="field-meta" id="reveal-count">{revealInputStatus}</span>
+                  <textarea
+                    id="secret-input"
+                    value={secret}
+                    onChange={(event) => setSecret(event.target.value)}
+                    placeholder="meet me by the old cinema at 8"
+                    spellCheck={false}
+                    aria-describedby="secret-count"
+                    autoFocus
+                  />
                 </div>
-                <textarea
-                  id="reveal-input"
-                  value={revealInput}
-                  onChange={(event) => setRevealInput(event.target.value)}
-                  placeholder="paste the full generated text here…"
-                  spellCheck={false}
-                  aria-describedby="reveal-count"
-                />
+
+                {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
+
+                <div className="step-actions">
+                  <span className="key-hint">enter to continue</span>
+                  <button className="primary-action" type="submit" disabled={!secret.trim()}>
+                    continue <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {mode === "hide" && hideStep === 2 && (
+            <section className="step-card" aria-labelledby="hide-step-two-title">
+              <div className="step-copy">
+                <span className="step-kicker">02 / configure</span>
+                <h2 id="hide-step-two-title">Make the outside look ordinary.</h2>
+                <p>Choose the tone of the visible text. Add a password if the hidden message should also be encrypted.</p>
               </div>
 
-              {(needsPassword || revealPassword) && (
-                <label className="password-row">
-                  <span>password required</span>
-                  <input type="password" value={revealPassword} onChange={(event) => setRevealPassword(event.target.value)} placeholder="enter the password used to hide it" autoComplete="current-password" autoFocus={needsPassword} />
+              <form onSubmit={(event) => { event.preventDefault(); void handleHide(); }}>
+                <fieldset className="choice-fieldset">
+                  <legend>visible text style</legend>
+                  <div className="choice-grid">
+                    {COVER_STYLES.map((style) => (
+                      <button
+                        className={coverStyle === style.value ? "choice active" : "choice"}
+                        key={style.value}
+                        type="button"
+                        onClick={() => setCoverStyle(style.value)}
+                        aria-pressed={coverStyle === style.value}
+                      >
+                        <strong>{style.label}</strong>
+                        <span>{style.hint}</span>
+                      </button>
+                    ))}
+                  </div>
+                </fieldset>
+
+                <label className="password-field">
+                  <span className="password-label"><strong>password</strong><em>optional</em></span>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder="leave blank for no encryption"
+                    autoComplete="new-password"
+                  />
+                  <small>{password ? "The hidden message will be encrypted before it is embedded." : "Without a password, the message is hidden but not encrypted."}</small>
                 </label>
-              )}
 
-              <button className="run-button" type="submit" disabled={busy || !revealInput.trim()}>
-                <span>{busy ? "checking text…" : "reveal hidden message"}</span>
-                <span aria-hidden="true">↵</span>
-              </button>
-            </form>
+                {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
 
-            {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
-
-            <section className={`terminal-output ${revealedSecret ? "has-output" : ""}`} aria-labelledby="reveal-output-heading">
-              <div className="output-heading"><span id="reveal-output-heading">hidden message</span><span>{revealedSecret ? "revealed" : "waiting"}</span></div>
-              {revealedSecret ? (
-                <div className="secret-result">{revealedSecret}</div>
-              ) : (
-                <div className="output-empty"><span>hidden message will appear here</span></div>
-              )}
+                <div className="step-actions split-actions">
+                  <button className="text-action" type="button" onClick={() => { setNotice(""); setHideStep(1); }}>← back</button>
+                  <button className="primary-action" type="submit" disabled={busy}>
+                    {busy ? "hiding…" : "hide message"} <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </form>
             </section>
-          </div>
-        )}
+          )}
 
-        <div className="terminal-statusbar" aria-hidden="true">
+          {mode === "hide" && hideStep === 3 && (
+            <section className="step-card result-step" aria-labelledby="hide-step-three-title">
+              <div className="result-intro">
+                <span className="success-mark" aria-hidden="true">✓</span>
+                <div>
+                  <span className="step-kicker">03 / share</span>
+                  <h2 id="hide-step-three-title">Hidden in plain sight.</h2>
+                  <p>Copy the text exactly as it is. Editing or reformatting it can damage the hidden data.</p>
+                </div>
+              </div>
+
+              <div className="result-console">
+                <div className="result-console-head">
+                  <span>generated text</span>
+                  <span className="ready-state">ready</span>
+                </div>
+                <div className="output-copy">{output}</div>
+              </div>
+
+              {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
+
+              <div className="result-actions">
+                <button className="primary-action" type="button" onClick={copyOutput}>{copied ? "copied ✓" : "copy text"}</button>
+                <button className="secondary-action" type="button" onClick={() => void handleHide()} disabled={busy}>{busy ? "generating…" : "generate another"}</button>
+                <button className="text-action" type="button" onClick={() => { setNotice(""); setHideStep(2); }}>edit settings</button>
+                <button className="text-action" type="button" onClick={resetHide}>new message</button>
+              </div>
+            </section>
+          )}
+
+          {mode === "reveal" && revealStep === 1 && (
+            <section className="step-card" aria-labelledby="reveal-step-one-title">
+              <div className="step-copy">
+                <span className="step-kicker">01 / paste</span>
+                <h2 id="reveal-step-one-title">Got some plaintext?</h2>
+                <p>Paste the full text you received. We’ll check it for a hidden message without changing it.</p>
+              </div>
+
+              <form onSubmit={(event) => { event.preventDefault(); void handleReveal(); }}>
+                <div className="terminal-field light-field">
+                  <div className="field-topline">
+                    <label className="field-label" htmlFor="reveal-input">text to inspect</label>
+                    <span className={`field-meta ${revealHiddenCount > 0 ? "detected" : ""}`} id="reveal-count">{revealInputStatus}</span>
+                  </div>
+                  <textarea
+                    id="reveal-input"
+                    value={revealInput}
+                    onChange={(event) => setRevealInput(event.target.value)}
+                    placeholder="paste the complete generated text here"
+                    spellCheck={false}
+                    aria-describedby="reveal-count"
+                    autoFocus
+                  />
+                </div>
+
+                {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
+
+                <div className="step-actions">
+                  <span className="key-hint">we never need the original visible text</span>
+                  <button className="primary-action" type="submit" disabled={busy || !revealInput.trim()}>
+                    {busy ? "checking…" : "reveal message"} <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {mode === "reveal" && revealStep === 2 && (
+            <section className="step-card compact-step" aria-labelledby="reveal-step-two-title">
+              <div className="step-copy">
+                <span className="step-kicker">02 / unlock</span>
+                <h2 id="reveal-step-two-title">This one is encrypted.</h2>
+                <p>The hidden message was protected with a password. Enter the same password that was used to hide it.</p>
+              </div>
+
+              <form onSubmit={(event) => { event.preventDefault(); void handleReveal(); }}>
+                <label className="password-field password-focus">
+                  <span className="password-label"><strong>password</strong><em>required</em></span>
+                  <input
+                    type="password"
+                    value={revealPassword}
+                    onChange={(event) => setRevealPassword(event.target.value)}
+                    placeholder="enter password"
+                    autoComplete="current-password"
+                    autoFocus={needsPassword}
+                  />
+                </label>
+
+                {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
+
+                <div className="step-actions split-actions">
+                  <button className="text-action" type="button" onClick={() => { setNotice(""); setRevealStep(1); }}>← back</button>
+                  <button className="primary-action" type="submit" disabled={busy || !revealPassword}>
+                    {busy ? "unlocking…" : "unlock message"} <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+              </form>
+            </section>
+          )}
+
+          {mode === "reveal" && revealStep === 3 && (
+            <section className="step-card result-step" aria-labelledby="reveal-step-three-title">
+              <div className="result-intro">
+                <span className="success-mark" aria-hidden="true">✓</span>
+                <div>
+                  <span className="step-kicker">03 / read</span>
+                  <h2 id="reveal-step-three-title">Found it.</h2>
+                  <p>The hidden message was recovered from the text you pasted.</p>
+                </div>
+              </div>
+
+              <div className="result-console secret-console">
+                <div className="result-console-head">
+                  <span>hidden message</span>
+                  <span className="ready-state">revealed</span>
+                </div>
+                <div className="secret-result">{revealedSecret}</div>
+              </div>
+
+              <div className="result-actions single-result-action">
+                <button className="primary-action" type="button" onClick={resetReveal}>check another</button>
+              </div>
+            </section>
+          )}
+        </div>
+
+        <div className="wizard-footer" aria-hidden="true">
           <span>{modelMessage}</span>
           <span>plaintext.fun / secret processed in browser</span>
         </div>
