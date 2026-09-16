@@ -404,7 +404,7 @@ export default function Home() {
                 {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
 
                 <div className="step-actions">
-                  <span className="key-hint">enter to continue</span>
+                  <span className="key-hint">nothing leaves the browser</span>
                   <button className="primary-action" type="submit" disabled={!secret.trim()}>
                     continue <span aria-hidden="true">→</span>
                   </button>
@@ -522,7 +522,7 @@ export default function Home() {
                 {notice && <div className="notice" role="alert"><span aria-hidden="true">!</span><span>{notice}</span></div>}
 
                 <div className="step-actions">
-                  <span className="key-hint">we never need the original visible text</span>
+                  <span className="key-hint">paste it exactly as received</span>
                   <button className="primary-action" type="submit" disabled={busy || !revealInput.trim()}>
                     {busy ? "checking…" : "reveal message"} <span aria-hidden="true">→</span>
                   </button>
