@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "plaintext",
-  description: "Hide a secret inside ordinary-looking text. Everything stays on your device.",
+  description: "Hide a message inside ordinary-looking text using invisible Unicode. Your secret is processed in your browser.",
 };
 
 export const viewport: Viewport = {
