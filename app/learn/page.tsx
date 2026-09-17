@@ -25,7 +25,7 @@ export default function LearnPage() {
           <section className="learn-block">
             <h2>The flow</h2>
             <div>
-              <p>The visible text and the hidden message are separate. plaintext.fun can create the visible text automatically, or you can write it yourself. The hidden data is inserted afterwards.</p>
+              <p>The visible text and the hidden message are separate. plaintext.fun can choose an English cover sentence automatically, or you can write the visible text yourself. The hidden data is inserted afterwards.</p>
               <pre className="learn-code">message → optional encryption → invisible Unicode → visible text</pre>
             </div>
           </section>
@@ -33,22 +33,21 @@ export default function LearnPage() {
           <section className="learn-block">
             <h2>Hide</h2>
             <div>
-              <p>Enter the message you want to hide. Leave the visible text on <strong>Automatic</strong>, or choose <strong>My own text</strong> and write exactly what people should see. Then select <strong>Hide message</strong> and copy the result unchanged.</p>
+              <p>Enter the message you want to hide. Leave the visible text on <strong>Automatic</strong> to use a local English sentence, or choose <strong>My own text</strong> and write exactly what people should see. Then select <strong>Hide message</strong> and copy the result unchanged.</p>
             </div>
           </section>
 
           <section className="learn-block">
-            <h2>Languages</h2>
+            <h2>Automatic text</h2>
             <div>
-              <p>The hidden message can be written in any Unicode language. Automatic visible text uses English by default and currently supports English, বাংলা, हिन्दी, Español, Français, Deutsch and العربية.</p>
-              <p>If you choose <strong>My own text</strong>, the visible text can also be written in any language.</p>
+              <p>Automatic mode uses a small built-in bank of curated English sentences in different lengths. A sentence is selected locally in your browser, so there is no AI model to download and no generation request to wait for.</p>
             </div>
           </section>
 
           <section className="learn-block">
             <h2>Reveal</h2>
             <div>
-              <p>Paste the complete visible text without editing it, then select <strong>Reveal</strong>. plaintext.fun reads the invisible characters and reconstructs the original message, regardless of the language it was written in.</p>
+              <p>Paste the complete visible text without editing it, then select <strong>Reveal</strong>. plaintext.fun reads the invisible characters and reconstructs the original hidden message.</p>
             </div>
           </section>
 
@@ -63,8 +62,8 @@ export default function LearnPage() {
           <section className="learn-block">
             <h2>Privacy</h2>
             <div>
-              <p>Your message and password are processed in your browser. The hidden message is inserted only after the visible text has been created or supplied by you.</p>
-              <p>The text generator is downloaded to your browser when needed. Your message is not sent away to create the visible sentence.</p>
+              <p>Your message and password are processed in your browser. Automatic cover text is selected from the local sentence bank, and your hidden message is inserted only afterwards.</p>
+              <p>There is no model inference or application backend involved in creating the cover text.</p>
             </div>
           </section>
 
@@ -76,7 +75,6 @@ export default function LearnPage() {
                 <li>Some apps and services may remove or normalize invisible Unicode characters. If that happens, the hidden message may not survive.</li>
                 <li>If you use a password, the recipient needs the same password to reveal the message.</li>
                 <li>If confidentiality matters, use a password. Hiding a message is not the same as encrypting it.</li>
-                <li>If browser-based text generation is unavailable, plaintext.fun uses built-in fallback text in the selected automatic language and the hide and reveal process still works.</li>
               </ul>
             </div>
           </section>
