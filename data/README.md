@@ -1,12 +1,13 @@
 # Cover sentence bank
 
-`cover-sentences.json` stores curated visible cover text for automatic mode.
+`cover-sentences.json` stores the curated English cover text used by Automatic mode.
 
-Each language is split into `short`, `medium`, and `long` buckets so the picker can vary output length without generating text at runtime.
+The bank currently contains 108 sentences split into three length buckets:
 
-Current status:
+- 36 short
+- 36 medium
+- 36 long
 
-- English: 108 sentences (36 short, 36 medium, 36 long)
-- Other supported languages: to be added in separate passes
+`lib/sentence-bank.ts` chooses a length at random, then picks a sentence from that bucket while avoiding recently used sentences.
 
-The site is not wired to this data yet. Automatic generation still uses the existing implementation until the remaining language banks are ready and the picker is introduced.
+There is no runtime text model, external generation request, or language-generation layer. Automatic cover selection is entirely local and immediate.
