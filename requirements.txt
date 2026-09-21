@@ -1,0 +1,2 @@
+# optional; the model falls back to a normal approximation without it
+scipy>=1.10
