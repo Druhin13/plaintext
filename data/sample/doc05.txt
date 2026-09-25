@@ -1,0 +1,9 @@
+Procurement has asked for a written position on whether we should continue to source the sensor assemblies from a single supplier. My view is that we should not, but the case is less clear than it was when we last considered it.
+
+The argument for consolidation was always cost. Our current supplier gives us a volume discount that no second source would match at the quantities we would be splitting, and the discount is worth roughly four percent of the unit cost. Against that we have to set the cost of the disruption we experienced in the spring, when a fire at their secondary plant halted deliveries for nine days and we lost about three weeks of production while the backlog cleared. The direct cost of that episode was larger than four percent of annual spend, and it was the second such incident in three years.
+
+The argument against dual sourcing is not only cost. Qualification of a second supplier would take roughly eight months and would consume engineering time that is currently committed to the next platform. There is also a quality consideration. Our current supplier has a defect rate below one hundred parts per million, which is better than any of the alternatives we evaluated two years ago, and mixing sources would mean accepting a higher blended rate or running more incoming inspection.
+
+What has changed is that two of the alternatives have improved. One has been qualified by a customer whose standards we consider comparable to ours, and the other has invested in the test capability that was the main concern last time. Neither would match our current supplier on price, but the gap has narrowed enough that the insurance value of a second source now looks like a reasonable purchase rather than an expensive one.
+
+I would recommend beginning qualification of one alternative supplier this year, with no immediate commitment to a volume split.

@@ -27,6 +27,7 @@ can be replayed offline.
 from __future__ import annotations
 
 import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -53,6 +54,14 @@ _WIKI_MARKUP = [
 
 
 def strip_wikitext(text: str) -> str:
+    """Crude wikitext removal.
+
+    Deliberately crude: we need prose-like token streams, not a faithful
+    render.  Anything left over is noise that affects both revisions equally,
+    so it does not bias the before/after comparison.  It *does* inflate the
+    apparent context entropy slightly, which is why the entropy column should
+    be read off the plain-prose corpora rather than this one.
+    """
     prev = None
     while prev != text:
         prev = text
@@ -62,9 +71,19 @@ def strip_wikitext(text: str) -> str:
     return "\n\n".join(ln for ln in lines if len(ln.split()) >= 6)
 
 
+# --------------------------------------------------------------------------
+# Wikipedia
+# --------------------------------------------------------------------------
+
 def fetch_wikipedia_pairs(titles: Sequence[str], per_title: int = 6,
                           lang: str = "en", cache_dir: Optional[str] = None,
                           timeout: int = 30) -> List[Pair]:
+    """Consecutive revision pairs for each title.
+
+    Untested in sandboxes without network egress to wikipedia.org.  Run once on
+    a networked machine with ``--cache`` set, then everything downstream works
+    offline.
+    """
     out: List[Pair] = []
     cache = Path(cache_dir) if cache_dir else None
     if cache:
@@ -94,7 +113,7 @@ def fetch_wikipedia_pairs(titles: Sequence[str], per_title: int = 6,
             for r in revs:
                 body = r.get("slots", {}).get("main", {}).get("content", "")
                 texts.append((r.get("revid"), strip_wikitext(body)))
-            texts.reverse()
+            texts.reverse()  # oldest first
             for (id0, t0), (id1, t1) in zip(texts, texts[1:]):
                 if len(t0.split()) < 200 or len(t1.split()) < 200:
                     continue
@@ -102,6 +121,10 @@ def fetch_wikipedia_pairs(titles: Sequence[str], per_title: int = 6,
                                 pair_id=f"{title}:{id0}->{id1}"))
     return out
 
+
+# --------------------------------------------------------------------------
+# local files
+# --------------------------------------------------------------------------
 
 def load_dir_pairs(path: str) -> List[Pair]:
     root = Path(path)

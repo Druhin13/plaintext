@@ -204,9 +204,9 @@ class Design:
 
 
 def design_coded(payload: Payload, carrier: Carrier, sec: Security,
-             dmg: Damage, c: int, addressing: Literal["self", "context"],
-               seed_bits: Optional[int] = None, rank_margin: int = 10,
-               target: float = 0.99) -> Design:
+                 dmg: Damage, c: int, addressing: Literal["context", "self"],
+                 seed_bits: Optional[int] = None, rank_margin: int = 10,
+                 target: float = 0.99) -> Design:
     """Coded observations, hard-decision (validate and erase)."""
     anchor_filtered = addressing == "context"
     n_obs = payload.n_obs(rank_margin)
@@ -237,11 +237,11 @@ def design_coded(payload: Payload, carrier: Carrier, sec: Security,
             detail={"v": v, "addr_bits": addr_bits, "n_obs": n_obs,
                     "blocks_wanted": blocks, "addr_capacity": 1 << addr_bits,
                     "note": f"needs {blocks} blocks, {addr_bits}-bit address "
-                            f"labels only {1 << YZHR7_bits}"})
+                            f"labels only {1 << addr_bits}"})
     total = None if blocks is None else blocks * block_bits / carrier.bits_per_char
     return Design(
         name=f"coded-{addressing}(c={c})",
-        block_bits=block_bits, obs_per_block=c, neds_address=anchor_filtered,
+        block_bits=block_bits, obs_per_block=c, needs_address=anchor_filtered,
         blocks_needed=blocks, total_chars=total,
         detail={"v": v, "addr_bits": addr_bits, "n_obs": n_obs,
                 "p_block": round(p_blk, 6)},
@@ -268,7 +268,7 @@ def design_indexed(payload: Payload, carrier: Carrier, sec: Security,
     Glyphmark's MESSAGE shape.  Recovery needs at least one surviving copy of
     every chunk index, which is where the log(n_chunks) penalty enters.
     """
-    n_chunks = max((1, math.ceil(payload.k_id / chunk_bits))
+    n_chunks = max(1, math.ceil(payload.k_id / chunk_bits))
     idx_bits = max(1, math.ceil(math.log2(max(2, n_chunks))))
     v = sec.v_required(1, anchor_filtered=False)
     block_bits = chunk_bits + idx_bits + v
@@ -284,7 +284,7 @@ def design_indexed(payload: Payload, carrier: Carrier, sec: Security,
     total = blocks * block_bits / carrier.bits_per_char
     return Design("indexed", block_bits, 0, False, blocks, total,
                   {"n_chunks": n_chunks, "copies_per_chunk": r, "v": v,
-                  "p_block": round(p_blk, 6)})
+                   "p_block": round(p_blk, 6)})
 
 
 def design_soft(payload: Payload, carrier: Carrier, sec: Security,
@@ -312,4 +312,190 @@ def design_soft(payload: Payload, carrier: Carrier, sec: Security,
     a_true = dmg.q
     a_wrong = (1.0 - dmg.q) / sec.density_D
     bogus = dmg.foreign_carriers / sec.density_D
-    surv = dmg.sigma_block * (1.0 - dmg.th
+    surv = dmg.sigma_block * (1.0 - dmg.thin_rate)
+
+    def delivered(n_placed: int) -> Tuple[float, float, float]:
+        """(information bits delivered, crossover p, accepted count).
+
+        A misaddressed or contaminating observation is not a *flipped* bit, it
+        is a *random* linear constraint: the decoder reads ``a' . m = y`` where
+        ``a'`` is the wrong coefficient vector, and the true payload satisfies
+        that with probability one half.  So the BSC crossover is
+
+            p = 0.5 * (misaddressed + bogus) / accepted
+
+        and it is bounded above by 0.5, never approaching 1.  Getting this
+        wrong matters: binary entropy is symmetric, so treating contaminated
+        observations as flipped rather than random makes a hopelessly
+        contaminated channel look like a nearly noiseless one.
+
+        Monotone increasing in ``n_placed``: correct observations grow linearly
+        while the contaminating count is fixed.  A fixed-point iteration on
+        this oscillates; a monotone search does not.
+        """
+        good = n_placed * surv * a_true
+        junk = n_placed * surv * a_wrong + bogus
+        acc = good + junk
+        if acc <= 0:
+            return 0.0, 0.5, 0.0
+        p = 0.5 * junk / acc
+        return acc * (1.0 - h2(p)) * code_efficiency, p, acc
+
+    p_limit = 0.5 * a_wrong / (a_true + a_wrong) if (a_true + a_wrong) > 0 else 0.5
+    if surv <= 0 or p_limit >= 0.5:
+        return Design("coded-soft(BOUND)", c, c, True, None, None,
+                      {"n_obs": n_obs, "p_limit": round(p_limit, 4),
+                       "note": "beyond BSC capacity at any budget"})
+
+    lo, hi = 1, max(2, n_obs)
+    while delivered(hi)[0] < n_obs:
+        hi *= 2
+        if hi > 50_000_000:
+            return Design("coded-soft(BOUND)", c, c, True, None, None,
+                          {"n_obs": n_obs, "note": "budget exceeds 5e7 carriers"})
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if delivered(mid)[0] >= n_obs:
+            hi = mid
+        else:
+            lo = mid + 1
+    _, p, acc = delivered(lo)
+    # ``c`` observations share one anchor (PRF(key, ctx, j)) and cost nothing
+    # extra, because the soft path carries no per-block field at all.  It only
+    # changes how many anchor *sites* the document has to supply.
+    return Design("coded-soft(BOUND)", c, c, True, math.ceil(lo / c),
+                  lo / carrier.bits_per_char,
+                  {"p_bsc": round(p, 5), "n_obs": n_obs, "carriers": lo,
+                   "capacity": round(1.0 - h2(p), 4), "bogus": round(bogus, 1)})
+
+
+# --------------------------------------------------------------------------
+# closed-form results
+# --------------------------------------------------------------------------
+
+def required_seed_bits(max_blocks: int, allocation: str = "sequential",
+                       eps_collision: float = 0.01) -> int:
+    """Size of the explicit address field for self addressing.
+
+    Two allocation policies, and the difference is large enough that leaving it
+    unstated is a real gap:
+
+      ``sequential``  the encoder assigns 0, 1, 2, ... so there are no
+                      collisions by construction and s = ceil(log2(blocks)).
+                      The seeds are not secret: the coefficient vector is
+                      PRF(key, seed), so a visible counter reveals nothing.
+      ``random``      seeds drawn independently, so birthday collisions waste
+                      observations.  Keeping the expected duplicate fraction
+                      below eps needs 2**s >= blocks**2 / (2*eps).
+
+    ``sequential`` is what the design should specify; ``random`` is here to
+    show what it costs not to.
+    """
+    b = max(2, max_blocks)
+    if allocation == "sequential":
+        return max(1, math.ceil(math.log2(b)))
+    if allocation == "random":
+        return max(1, math.ceil(math.log2(b * b / (2.0 * eps_collision))))
+    raise ValueError("allocation must be 'sequential' or 'random'")
+
+
+def q_breakeven(c: int, sec: Security, payload: Payload, seed_bits: int,
+                rank_margin: int = 10, thin_rate: float = 0.0,
+                carrier: Optional[Carrier] = None) -> float:
+    """Address survival above which context addressing beats self addressing.
+
+    Equating cost per usable observation,
+
+        (c + v_c) / (q * (1-r)**(L_c/b))  =  (s + c + v_s) / (1-r)**(L_s/b)
+
+    with L_c = c + v_c and L_s = s + c + v_s, gives
+
+        q*(r)  =  [(c + v_c) / (s + c + v_s)] * (1-r)**((L_s - L_c)/b)
+               =  q*(0) * (1-r)**((s + v_s - v_c)/b)
+
+    **q* is channel-dependent, and the zero-thinning value is only a
+    reference.**  A self-addressed block is longer by the seed plus the
+    validation bits the anchor would otherwise have supplied, so independent
+    carrier loss penalises it disproportionately and the bar for context
+    addressing falls.  At D=20, c=8, s=10, b=1 the threshold runs 0.632 at
+    r=0, 0.549 at 1%, 0.476 at 2%, 0.308 at 5%.
+
+    This composes with the finding in MODEL.md section 13 in a way worth
+    noticing: thinning is both the only channel on which coded observations
+    beat repeated packets *and* the channel that favours context addressing
+    over self addressing.  The two open questions are not independent.
+    """
+    n_obs = payload.n_obs(rank_margin)
+    v_s = sec.v_required(n_obs, anchor_filtered=False)
+    v_c = sec.v_required(n_obs, anchor_filtered=True)
+    q0 = (c + v_c) / (seed_bits + c + v_s)
+    if thin_rate <= 0:
+        return q0
+    b = carrier.bits_per_char if carrier else 1.0
+    return q0 * (1.0 - thin_rate) ** ((seed_bits + v_s - v_c) / b)
+
+
+def optimal_cluster(overhead_bits: int, thin_rate: float) -> float:
+    """Cluster payload ``c`` minimising bits per usable observation.
+
+    Cost per observation is ``(u + c) / (c * (1-r)**(u+c))`` with u the fixed
+    per-block overhead.  Setting the derivative of the log to zero:
+
+        1/(u+c) - 1/c + alpha = 0,   alpha = -ln(1-r)
+
+    which gives c* = (-u + sqrt(u**2 + 4u/alpha)) / 2.
+
+    The shape is the point: with no thinning the optimum runs away to infinity
+    (amortise the overhead over as many observations as possible), and any
+    per-carrier loss pulls it back to a finite value.  Nobody chooses packet
+    size this way today.
+    """
+    if thin_rate <= 0:
+        return float("inf")
+    alpha = -math.log(1.0 - thin_rate)
+    u = float(overhead_bits)
+    return (-u + math.sqrt(u * u + 4.0 * u / alpha)) / 2.0
+
+
+def optimal_cluster_bruteforce(overhead_bits: int, thin_rate: float,
+                               cmax: int = 4000) -> int:
+    """Independent check of ``optimal_cluster`` by direct search."""
+    best, best_c = float("inf"), 1
+    for c in range(1, cmax + 1):
+        L = overhead_bits + c
+        p = (1.0 - thin_rate) ** L
+        if p <= 0:
+            break
+        cost = L / (c * p)
+        if cost < best:
+            best, best_c = cost, c
+    return best_c
+
+
+def compare(payload: Payload, carrier: Carrier, sec: Security, dmg: Damage,
+            c: int = 8, seed_bits: int = 10, words: int = 1000,
+            chunk_bits: int = 16) -> Dict[str, Design]:
+    """All five designs under one damage model."""
+    return {
+        "monolithic": design_monolithic(payload, carrier, sec, dmg),
+        "indexed": design_indexed(payload, carrier, sec, dmg, chunk_bits),
+        "coded-self": design_coded(payload, carrier, sec, dmg, c, "self", seed_bits),
+        "coded-context": design_coded(payload, carrier, sec, dmg, c, "context"),
+        "coded-soft": design_soft(payload, carrier, sec, dmg, c=c),
+    }
+
+
+def feasible(design: Design, words: int, sec: Security,
+             collision_rate: float = 0.0) -> bool:
+    """Can a document of this length actually host the required blocks?
+
+    Context addressing has a hard supply limit that self addressing does not:
+    one anchor per D words, minus duplicates.  A design can be cheap per
+    observation and still not fit.
+    """
+    if design.blocks_needed is None:
+        return False
+    if not design.needs_address:
+        return True
+    sites = (words / sec.density_D) * (1.0 - collision_rate)
+    return design.blocks_needed <= sites

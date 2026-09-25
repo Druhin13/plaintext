@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import random
 import sys
 from typing import List, Sequence
@@ -135,12 +136,15 @@ def cmd_model(args: argparse.Namespace) -> int:
                      thin_rate=args.thin, carrier=carrier)
     print(f"q* (context beats self addressing above this) = {qb:.3f}")
     if args.thin > 0:
+        # v_required already applies the anchor discount.  Subtracting log2(D)
+        # again here was the same bug as in design_coded, at a second site that
+        # the first fix missed.  Found in external review, round two.
         v = sec.v_required(payload.n_obs(), anchor_filtered=True)
         c_star = optimal_cluster(max(0, v), args.thin)
         c_bf = optimal_cluster_bruteforce(max(1, v), args.thin)
         print(f"optimal cluster payload c* = {c_star:.1f} (closed form), "
               f"{c_bf} (brute force)")
-    for _, d in designs.items():
+    for name, d in designs.items():
         if d.needs_address and not feasible(d, args.words, sec):
             print(f"INFEASIBLE: {d.name} needs {d.blocks_needed} anchor sites, "
                   f"a {args.words}-word document supplies "
@@ -149,6 +153,7 @@ def cmd_model(args: argparse.Namespace) -> int:
 
 
 def cmd_decide(args: argparse.Namespace) -> int:
+    """Apply the cost model to measured rates, row by row."""
     import csv
     payload = Payload(mode=args.mode, k_id=args.k_id, tau=args.tau)
     carrier = Carrier(bits_per_char=args.bits_per_char)
@@ -160,7 +165,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
         dmg = Damage(sigma_block=float(r["sigma_block"]), q=float(r["q"]),
                      thin_rate=args.thin, foreign_carriers=args.foreign)
         qb = q_breakeven(args.c, sec, payload, args.seed_bits,
-                         thin_rate=args.thin, carrier=carrier)
+                     thin_rate=args.thin, carrier=carrier)
         designs = compare(payload, carrier, sec, dmg, c=args.c,
                           seed_bits=args.seed_bits, words=args.words)
         priced = {k: v for k, v in designs.items()
@@ -232,7 +237,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     m.add_argument("--k-id", type=int, default=48, dest="k_id")
     m.add_argument("--tau", type=int, default=32)
     m.add_argument("--roster", type=int, default=500)
-    m.add_argument("--bits-per-char", type=float, default=1.0, dest="bits_per_char")
+    m.add_argument("--bits-per-char", type=float, default=1.0,
+                   dest="bits_per_char")
     m.add_argument("--density", type=int, default=20)
     m.add_argument("--sites", type=int, default=200)
     m.add_argument("--c", type=int, default=8)

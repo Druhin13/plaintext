@@ -1,10 +1,35 @@
-"""Marked documents and the channels that damage them."""
+"""Marked documents and the channels that damage them.
+
+A ``MarkedDoc`` is a list of slots.  Slot ``i`` holds token ``i`` together with
+the carrier marks sitting immediately *before* it, so any operation that moves,
+copies or deletes slots carries the marks along automatically and there is no
+alignment problem for synthetic channels.  (Real revision pairs do need
+alignment; see ``align.py``.)
+
+Boundary policy for deletions: deleting token slice ``[a, b)`` deletes slots
+``a .. b-1``, which erases the marks in gaps ``a .. b-1`` and keeps the marks in
+gap ``b``.  This is the pessimistic reading of a user selecting a span and
+pressing delete, and it is the reading that makes the measurement conservative.
+
+The channels fall into three families, and they stress different terms in the
+cost model:
+
+  * **block loss** (crop, fragments, sentence deletion, paragraph reorder,
+    splice) removes whole regions.  Survival is bursty; block length barely
+    matters.
+  * **carrier thinning** (``thin``) removes individual carriers independently.
+    Survival of an atomic authenticated block of length L goes as sigma**L, so
+    this is the channel where block length dominates everything.
+  * **context mutation** (reword, typo, recase, repunctuate) leaves the carrier
+    in place but changes the visible text around it.  This is the channel that
+    only exists post-hoc, and the one the whole project is about.
+"""
 
 from __future__ import annotations
 
 import random
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Sequence
 
 from .text import FUNCTION_WORDS, Doc
@@ -30,6 +55,7 @@ class MarkedDoc:
         return [s.token for s in self.slots]
 
     def gap_of_marks(self) -> Dict[int, int]:
+        """mark id -> gap index in the current token list."""
         out: Dict[int, int] = {}
         for i, slot in enumerate(self.slots):
             for m in slot.marks:
@@ -50,6 +76,13 @@ class MarkedDoc:
 
 
 def place(doc: Doc, gaps: Sequence[int], per_site: int = 1) -> MarkedDoc:
+    """Attach ``per_site`` marks at each of ``gaps``.
+
+    Mark ids are ``site_index * per_site + j`` so the site a mark belongs to is
+    recoverable as ``mark_id // per_site``.  A site is all-or-nothing in the
+    hard-decision design (one validation tag covers the whole cluster), which
+    ``measure.py`` relies on.
+    """
     slots = [Slot([], t, p) for t, p in zip(doc.tokens, doc.para_of)]
     md = MarkedDoc(slots=slots, doc_id=doc.doc_id)
     n = len(doc.tokens)
@@ -61,6 +94,10 @@ def place(doc: Doc, gaps: Sequence[int], per_site: int = 1) -> MarkedDoc:
             md.tail_marks.extend(ids)
     return md
 
+
+# --------------------------------------------------------------------------
+# helpers
+# --------------------------------------------------------------------------
 
 def _sentence_spans(md: MarkedDoc) -> List[tuple[int, int]]:
     spans, start = [], 0
@@ -91,6 +128,10 @@ def _keep_slices(md: MarkedDoc, slices: Sequence[tuple[int, int]]) -> MarkedDoc:
     return MarkedDoc(slots=out, tail_marks=list(tail), doc_id=md.doc_id)
 
 
+# --------------------------------------------------------------------------
+# channels
+# --------------------------------------------------------------------------
+
 Channel = Callable[[MarkedDoc, random.Random], MarkedDoc]
 
 
@@ -101,6 +142,7 @@ def identity() -> Channel:
 
 
 def crop(keep_frac: float) -> Channel:
+    """One contiguous excerpt of the document."""
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         n = len(md.slots)
         span = max(1, int(round(n * keep_frac)))
@@ -110,6 +152,12 @@ def crop(keep_frac: float) -> Channel:
 
 
 def fragments(n_frags: int, keep_frac: float) -> Channel:
+    """``n_frags`` disjoint excerpts, in original order, totalling keep_frac.
+
+    The interesting axis is not how much survives but in how many pieces.  Two
+    runs of the same total length behave identically for a coded scheme and
+    very differently for a packet scheme.
+    """
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         n = len(md.slots)
         total = max(n_frags, int(round(n * keep_frac)))
@@ -127,6 +175,7 @@ def fragments(n_frags: int, keep_frac: float) -> Channel:
 
 
 def delete_sentences(frac: float) -> Channel:
+    """Remove a random subset of sentences."""
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         spans = _sentence_spans(md)
         keep = [s for s in spans if rng.random() >= frac]
@@ -145,6 +194,18 @@ def reorder_paragraphs() -> Channel:
 
 def splice_foreign(foreign: Sequence[str], frac: float,
                    run: int = 20) -> Channel:
+    """Insert unmarked foreign *runs* into the document.
+
+    Insertion in contiguous runs, not token by token.  This matters more than
+    it looks: scattering single foreign words at rate f destroys a left-sided
+    context of width w with probability 1-(1-f)**w, so word-level interleaving
+    annihilates every address at any realistic f.  Real splicing inserts whole
+    sentences, which breaks only the w tokens that straddle each seam.  Getting
+    this wrong makes insertion look like the dominant threat when it is close
+    to the mildest one.
+
+    Pure insertion: no carrier is lost and no existing token is edited.
+    """
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         n = len(md.slots)
         if not foreign or n == 0:
@@ -165,6 +226,13 @@ def splice_foreign(foreign: Sequence[str], frac: float,
 
 
 def reword(vocab: Sequence[str], frac: float) -> Channel:
+    """Replace a fraction of *content* tokens with other content tokens.
+
+    Models paraphrase.  The carrier before a replaced token survives, because
+    the user selected the word, not the invisible character preceding it.  So
+    this channel produces surviving-but-misaddressed marks, which is precisely
+    the failure mode that does not exist in generation-time watermarking.
+    """
     pool = [w for w in vocab if w.lower() not in FUNCTION_WORDS] or list(vocab)
 
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
@@ -179,6 +247,7 @@ def reword(vocab: Sequence[str], frac: float) -> Channel:
 
 
 def typo(frac: float) -> Channel:
+    """Character-level perturbation inside tokens."""
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         out = md.copy()
         for s in out.slots:
@@ -190,6 +259,7 @@ def typo(frac: float) -> Channel:
 
 
 def recase() -> Channel:
+    """Title-case every token: pure case noise, should be free under NFKC+fold."""
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         out = md.copy()
         for s in out.slots:
@@ -199,7 +269,8 @@ def recase() -> Channel:
 
 
 def repunctuate() -> Channel:
-    table = {'"': "“", "'": "’", "-": "–", "...": "…"}
+    """Swap quote and dash styles.  Free for ``alnum`` and above, fatal for ``raw``."""
+    table = {'"': "\u201c", "'": "\u2019", "-": "\u2013", "...": "\u2026"}
 
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         out = md.copy()
@@ -213,6 +284,12 @@ def repunctuate() -> Channel:
 
 
 def thin(rate: float) -> Channel:
+    """Drop each carrier independently.  Models partial sanitisation.
+
+    No visible text changes, so every surviving mark is correctly addressed.
+    This isolates the block-length term: it is the channel on which a 80-carrier
+    packet dies and a 30-carrier cluster does not.
+    """
     def ch(md: MarkedDoc, rng: random.Random) -> MarkedDoc:
         out = md.copy()
         for s in out.slots:
@@ -231,6 +308,17 @@ def compose(*chs: Channel) -> Channel:
 
 
 def standard_suite(vocab: Sequence[str], foreign: Sequence[str]) -> Dict[str, Channel]:
+    """The channel set the pre-registered thresholds are defined against.
+
+    The two composite channels are named ``synthA``/``synthB`` and not
+    ``leak-realistic``/``leak-hostile`` on purpose.  We chose these parameters;
+    nothing has yet shown they resemble how documents are actually excerpted
+    and redistributed.  Calling an invented distribution "realistic" and then
+    pre-registering a pass mark against it is setting our own exam.  The names
+    stay neutral until the parameters are calibrated against plagiarism or
+    quotation corpora, and the kill criterion is stated over a parameter
+    surface rather than over one cell (see PREREGISTRATION.md C4).
+    """
     return {
         "clean": identity(),
         "recase": recase(),

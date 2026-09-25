@@ -18,6 +18,12 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Callable, List, Sequence
 
+# Carrier code points.  ZWNJ/ZWJ are the renderer-safe binary pair: invisible in
+# Word, Google Docs, browsers and chat.  U+200B is deliberately excluded (Word
+# strips it on paste) and variation selectors are excluded (they render as tofu
+# in Word/Docs).  The INVISIBLE_OPERATORS set is an alternative carrier class,
+# useful because it is disjoint from what other zero-width watermarks use, which
+# matters for the contamination analysis in MODEL.md section 9.
 ZWNJ = "\u200c"
 ZWJ = "\u200d"
 BINARY_CARRIER = (ZWNJ, ZWJ)
@@ -26,6 +32,10 @@ INVISIBLE_OPERATORS = ("\u2061", "\u2062", "\u2063", "\u2064")
 _TOKEN_RE = re.compile(r"\S+")
 _ALNUM_RE = re.compile(r"[^0-9a-z]+")
 
+# Closed-class words.  The skeleton canonicaliser keeps only these, on the
+# theory that paraphrase replaces content words far more often than function
+# words, so a skeleton address should survive rewording that a literal one does
+# not.  Whether that is actually true is exactly what we are measuring.
 FUNCTION_WORDS = frozenset("""
 a about above after again against all am an and any are as at be because been
 before being below between both but by can cannot could did do does doing down
@@ -87,6 +97,10 @@ def parse(text: str, doc_id: str = "") -> Doc:
     return Doc(tokens=tokens, para_of=para_of, doc_id=doc_id)
 
 
+# --------------------------------------------------------------------------
+# Canonicalisers.  Each takes a token window and returns bytes.
+# --------------------------------------------------------------------------
+
 Canonicaliser = Callable[[Sequence[str]], bytes]
 
 
@@ -95,20 +109,30 @@ def _nfkc_lower(tok: str) -> str:
 
 
 def canon_raw(window: Sequence[str]) -> bytes:
+    """NFKC + casefold only.  Punctuation and inflection are significant."""
     return " ".join(_nfkc_lower(t) for t in window).encode("utf-8")
 
 
 def canon_alnum(window: Sequence[str]) -> bytes:
+    """Strip everything but lowercase alphanumerics.  Reflow- and
+    punctuation-insensitive, which is what Glyphmark's normalisation does."""
     parts = [_ALNUM_RE.sub("", _nfkc_lower(t)) for t in window]
     return " ".join(p for p in parts if p).encode("utf-8")
 
 
 def canon_stem(window: Sequence[str]) -> bytes:
+    """canon_alnum plus light stemming: survives tense/number changes."""
     parts = [light_stem(_ALNUM_RE.sub("", _nfkc_lower(t))) for t in window]
     return " ".join(p for p in parts if p).encode("utf-8")
 
 
 def canon_skeleton(window: Sequence[str]) -> bytes:
+    """Function words in order; content words collapse to a length bucket.
+
+    Keeps syntactic shape while discarding the lexical choices a paraphraser is
+    most likely to change.  Length bucketing retains a little content signal so
+    the address does not collapse to a handful of distinct values.
+    """
     out: List[str] = []
     for t in window:
         w = _ALNUM_RE.sub("", _nfkc_lower(t))
@@ -122,6 +146,11 @@ def canon_skeleton(window: Sequence[str]) -> bytes:
 
 
 def canon_initials(window: Sequence[str]) -> bytes:
+    """First letter of each token.  Maximum edit tolerance, minimum entropy.
+
+    Included as the low-entropy end of the range: it should show the highest
+    survival rate and the highest collision rate, bracketing the trade-off.
+    """
     out = []
     for t in window:
         w = _ALNUM_RE.sub("", _nfkc_lower(t))
@@ -141,6 +170,17 @@ CANONICALISERS: dict[str, Canonicaliser] = {
 
 def window_tokens(tokens: Sequence[str], gap: int, width: int,
                   side: str = "left") -> List[str] | None:
+    """Tokens forming the context of ``gap``.
+
+    ``side='left'``  : the ``width`` tokens before the gap.
+    ``side='sym'``   : ``width // 2`` either side.
+
+    Returns ``None`` when the window would run off the end of the document,
+    which makes those gaps ineligible as anchors for both encoder and decoder.
+    Left-sided windows are the interesting default: an insertion *after* the
+    mark cannot disturb the address, so the two sides are not symmetric in
+    robustness.
+    """
     n = len(tokens)
     if side == "left":
         if gap - width < 0:
@@ -156,6 +196,8 @@ def window_tokens(tokens: Sequence[str], gap: int, width: int,
 
 @dataclass
 class ContextSpec:
+    """A full address definition: how wide, which side, which canonicaliser."""
+
     width: int
     canon: str = "alnum"
     side: str = "left"
