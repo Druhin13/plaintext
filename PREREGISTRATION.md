@@ -26,11 +26,11 @@ what changed and why.
 | carrier | renderer-safe binary (ZWNJ/ZWJ), `b = 1` bit/char |
 | payload | `k_id = 48`, `tau = 32`, tag mode |
 | cluster | `c = 8` |
-| self-address baseline | `s = 10` bits (1024 sequential block addresses) |
+| seed field | `s = 10` bits |
 | anchor density | `D = 20` |
 | document length | 5 000 words |
 | anchor sites assumed for validation sizing | `n_anchor_sites = 400` |
-| seed allocation | **sequential and unique**; configurations needing >1024 blocks are infeasible at the fixed 10-bit baseline and are reported separately with a widened seed |
+| seed allocation | **sequential and unique**; the preregistered baseline keeps `s = 10` |
 | validation strength | as computed by `Security.v_required`, applied **once** |
 | contamination budget | `eps_contamination = 0.01` |
 | misaddressing budget | `eps_misaddress = 0.01` |
