@@ -1,0 +1,9 @@
+Access to the customer records system will change on the first of next month. The current arrangement, in which most staff hold read and write permissions across the entire record set, was appropriate when the company was smaller and everybody worked in the same building. It is no longer appropriate and the external auditors have said so in each of the last three reviews.
+
+Under the new arrangement, permissions will be granted by role rather than by individual request. There are seven roles and each is defined by the minimum set of records a person in that role needs in order to do their job. Sales staff will see the accounts assigned to them and the accounts of colleagues in the same territory. Support staff will see any account with an open ticket, and that visibility will lapse automatically when the ticket closes. Finance will retain broad read access but will lose write access outside the billing fields.
+
+Managers should review the role assignments for their teams before the twentieth. Anybody who believes their role does not give them the access they need should raise it through the service desk rather than through informal channels, because the whole point of the change is that access decisions are recorded and reviewable. Exceptions will be granted where the case is clear, but they will be time limited and they will expire without further notice.
+
+We expect the first two weeks to be disruptive. Reports that currently draw on the full record set will fail, and some of those reports are embedded in processes nobody has documented. If a report you depend on stops working, tell us what it was for rather than asking for the old permissions back. In most cases we will be able to provide the same output through a service account that is properly scoped.
+
+Training material is available on the internal site and there will be three drop-in sessions during the transition week.

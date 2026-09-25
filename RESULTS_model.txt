@@ -1,0 +1,139 @@
+
+1. Payload scaling at fixed damage (sigma=0.3, q=0.8, thin=1%)
+==============================================================
+Carrier characters required for 99% recovery. 'ratio' = monolithic/coded-context.
+payload id bits  monolithic  indexed  coded-self  coded-context  ratio 
+---------------  ----------  -------  ----------  -------------  ------
+32               1872        1702     3116        2208           0.8x  
+48               2992        2850     3686        2472           1.2x  
+64               4284        4104     4142        2928           1.5x  
+96               8584        6786     5206        3480           2.5x  
+128              15244       9360     6194        4152           3.7x  
+192              43672       15360    7828        5544           7.9x  
+256              108744      21120    9880        6624           16.4x 
+384              595496      35424    13604       9120           65.3x 
+512              2791404     48544    16264       11568          241.3x
+
+2. Thinning sensitivity at fixed payload (k_id=128, sigma=1.0, q=0.9)
+=====================================================================
+Independent per-carrier loss. This is where block length enters the exponent.
+thin rate  monolithic  indexed  coded-context(c=8)
+---------  ----------  -------  ------------------
+0.000      296         312      648               
+0.005      1480        1248     768               
+0.010      3996        1872     912               
+0.020      21460       3744     1224              
+0.050      2174416     14352    2928              
+0.100      -           126048   11304             
+
+3. Optimal cluster payload c*: closed form vs brute force
+=========================================================
+c* = (-u + sqrt(u^2 + 4u/alpha))/2,  alpha = -ln(1-r),  u = fixed block overhead
+overhead u (bits)  thin rate  c* closed form  c* brute force    
+-----------------  ---------  --------------  --------------  --
+11                 0.002      68.8            69              ok
+11                 0.01       28.0            28              ok
+11                 0.05       10.1            10              ok
+11                 0.1        6.1             6               ok
+19                 0.002      88.4            88              ok
+19                 0.01       35.0            35              ok
+19                 0.05       12.0            12              ok
+19                 0.1        6.9             7               ok
+26                 0.002      101.7           102             ok
+26                 0.01       39.5            39              ok
+26                 0.05       13.0            13              ok
+26                 0.1        7.4             7               ok
+42                 0.002      125.4           125             ok
+42                 0.01       47.0            47              ok
+42                 0.05       14.5            14              ok
+42                 0.1        8.0             8               ok
+
+4. Break-even address survival q*
+=================================
+Context addressing beats self addressing iff measured q exceeds q*.
+q* = (c + v_c)/(s + c + v_s),  v_c = V - log2(D),  v_s = V
+anchor density D  cluster c  q*   
+----------------  ---------  -----
+8                 4          0.606
+8                 8          0.649
+8                 16         0.711
+8                 32         0.787
+20                4          0.588
+20                8          0.632
+20                16         0.696
+20                32         0.774
+64                4          0.556
+64                8          0.600
+64                16         0.667
+64                32         0.750
+256               4          0.526
+256               8          0.571
+256               16         0.640
+256               32         0.727
+
+5. Soft decoding: where the BSC path beats the validated path, and where it dies
+================================================================================
+Soft = no per-block MAC, misaddressing decoded as noise. Contamination = foreign
+invisible characters already in the document (another watermark, for instance).
+q     foreign chars  soft chars  p_bsc    validated chars
+----  -------------  ----------  -------  ---------------
+0.95  0              196         0.00131  864            
+0.95  500            274         0.08149  864            
+0.95  2000           384         0.1776   864            
+0.95  4000           479         0.23428  864            
+0.8   0              240         0.00617  1056           
+0.8   500            328         0.08439  1056           
+0.8   2000           458         0.17915  1056           
+0.8   4000           571         0.23519  1056           
+0.6   0              337         0.01613  1512           
+0.6   500            446         0.09022  1512           
+0.6   2000           618         0.18208  1512           
+0.6   4000           767         0.23719  1512           
+0.4   0              547         0.03488  2328           
+0.4   500            695         0.10155  2328           
+0.4   2000           947         0.18808  2328           
+0.4   4000           1170        0.24089  2328           
+
+6. Anchor supply: the constraint self-addressing does not have
+==============================================================
+Context addressing can only mark one gap in D. Blocks needed vs sites available.
+words  D   blocks needed  sites available  fits
+-----  --  -------------  ---------------  ----
+500    8   173            62               NO  
+500    20  163            25               NO  
+500    64  163            7                NO  
+1000   8   173            125              NO  
+1000   20  173            50               NO  
+1000   64  163            15               NO  
+2000   8   173            250              yes 
+2000   20  173            100              NO  
+2000   64  163            31               NO  
+5000   8   173            625              yes 
+5000   20  173            250              yes 
+5000   64  173            78               NO  
+10000  8   173            1250             yes 
+10000  20  173            500              yes 
+10000  64  173            156              NO  
+
+7. Roster mode: no in-band tag when the recipient set is known
+==============================================================
+mode    roster  k bits  coset slack d  observations  coded-context chars
+------  ------  ------  -------------  ------------  -------------------
+tag     -       80      12             78            2472               
+roster  500     40      11             39            1584               
+roster  50000   40      4              46            1776               
+
+8. RANSAC feasibility check (why unvalidated dense decoding is not an option)
+=============================================================================
+Expected trials to draw k+margin clean equations at misaddressing rate p.
+p (misaddress rate)  clean sample size  expected trials
+-------------------  -----------------  ---------------
+0.05                 78                 54.6           
+0.1                  78                 3.71e+03       
+0.21                 78                 9.66e+07       
+0.3                  78                 1.21e+12       
+0.51                 78                 1.46e+24       
+
+Glyphmark's published anchor table gives region-change rates of 0.21 at
+40-char windows / 20% deletion and 0.51 at 100-char windows / 20% deletion.
+Both are already out of reach, so validation bits are mandatory, not optional.
