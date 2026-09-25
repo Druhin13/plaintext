@@ -40,9 +40,9 @@ jobs:
               try:
                   payload = "".join(p.read_text().strip() for p in files)
                   raw = base64.b64decode(payload, validate=True)
-                  pkg = Path("/tmp/cauf-baseline.tar.gz")
+                  pkg = Path("/tmp/cauf-baseline.tar")
                   pkg.write_bytes(raw)
-                  with tarfile.open(pkg, "r:gz") as tf:
+                  with tarfile.open(pkg, "r:*") as tf:
                       names = tf.getnames()
                       if not any(n.endswith("pyproject.toml") for n in names):
                           continue
@@ -57,7 +57,7 @@ jobs:
           out = Path("/tmp/cauf-unpacked")
           shutil.rmtree(out, ignore_errors=True)
           out.mkdir()
-          with tarfile.open(chosen[0], "r:gz") as tf:
+          with tarfile.open(chosen[0], "r:*") as tf:
               tf.extractall(out)
 
           roots = [p for p in out.rglob("pyproject.toml")]
