@@ -243,60 +243,112 @@ result to be embarrassed by; it is the boundary, and stating it is what makes
 the rest credible. The crossover with this damage model is near 96 bits, not
 64 as the pre-correction numbers suggested.
 
-**Important caveat.** The indexed `k log k` claim assumes the required chunk
-indices behave like coupons under the survival process. If a real baseline
-schedules chunk indices round-robin, a contiguous excerpt containing one full
-cycle can recover every index without a coupon-collector penalty. C5 therefore
-gates any general payload-scaling claim.
+**And a payload that large has to be justified.** A leak-tracing deployment can
+embed a 32-bit opaque identifier and resolve everything else server-side, which
+is what Glyphmark's 10-byte packet does. If the payload can always be a short
+lookup key, the whole right-hand side of this table solves a problem nobody
+has. §3.2's roster-mode discount makes this worse, not better: it argues for
+*smaller* payloads and directly undercuts §7's headline. The two sections pull
+against each other and the project has to pick one.
+
+The defensible large-payload case is **public verifiability**. An HMAC tag
+resolves against a private key held by one organisation; a third party who must
+verify without being able to forge needs a signature carried in band. Ed25519
+is 512 bits. That is exactly the regime where §8 says monolithic packets die
+exponentially, and it is a use case a lookup table cannot serve because there
+is no shared database across organisations. If the paper keeps the payload-
+scaling headline, that is the scenario it has to be about, and it should be
+stated in the abstract rather than defended in rebuttal.
 
 ---
 
-## 8. Short contiguous excerpts: where repeated packets win
+## 8. Thinning sensitivity
 
-Repeated packets are *better* on small contiguous excerpts, structurally.
+At `k_id=128, sigma=1.0, q=0.9` (`RESULTS_model.txt` section 2):
 
-A 10-byte Glyphmark CORE packet is self-contained. One intact insertion site
-recovers the entire 2-byte id + timestamp + MAC. At 10–30 word spacing, a
-30-word excerpt almost certainly contains one.
+| thin rate | monolithic | indexed | coded-context(c=8) |
+|---|---|---|---|
+| 0.000 | 148 | 312 | 540 |
+| 0.005 | 1 184 | 1 248 | 620 |
+| 0.010 | 2 664 | 1 872 | 720 |
+| 0.020 | 13 320 | 3 744 | 920 |
+| 0.050 | 1 350 056 | 14 352 | 1 840 |
+| 0.100 | — | 126 048 | 5 700 |
 
-A coded system with an 80-bit total payload needs roughly 70 independent
-observations after coset slack. At one observation per two words, that is about
-140 words. It cannot compete at the small-excerpt end and should not claim to.
-
-The payoff, if the real channel supports it, is payload scaling and tolerance
-to distributed thinning — not magic locality.
+On an undamaged channel the monolithic packet is the cheapest thing you can
+build, by 3.6x. One percent carrier loss reverses that by 3.7x and five
+percent reverses it by 730x. This matches Glyphmark's own published behaviour:
+its word-safe encoding collapses between 5% and 10% uniform per-character
+deletion because a packet is 80 zero-width characters and `0.9^80` is
+effectively zero.
 
 ---
 
-## 9. Contamination and the soft path
+## 9. Contamination, and why RANSAC is not an option
 
-A misaddressed observation is not a flipped bit. It is a random constraint
-`a'·m = y` with the wrong coefficient vector; the true payload satisfies it
-with probability one half. The effective BSC crossover is therefore
+### 9.1 Misaddressed observations are random, not flipped
+
+A misaddressed carrier gives the decoder `a' . m = y` where `a'` is the wrong
+coefficient vector. The true payload satisfies that with probability **one
+half**, so the BSC crossover is
 
 ```
-p = 0.5 * junk / accepted
+p = 0.5 * (misaddressed + contaminating) / accepted      <= 0.5
 ```
 
-and must be capped at 0.5. Treating junk as deterministic flips is a modelling
-bug because binary entropy is symmetric and otherwise a completely contaminated
-document appears recoverable again as `p -> 1`.
+This is easy to get wrong and the error is not benign: binary entropy is
+symmetric, so treating contamination as bit-flips rather than random
+constraints makes a destroyed channel look nearly noiseless. An earlier draft
+of `model.py` did exactly that and reported a hopelessly contaminated document
+as recoverable from one carrier. `test_contamination_never_helps_the_soft_path`
+exists to stop it recurring.
 
-The hard path rejects changed addresses with validation bits and treats them as
-erasures. The soft path tries to decode through them.
+### 9.2 Unvalidated dense decoding is dead
 
-**RANSAC does not rescue dense equations.** To get a clean information set of
-about 78 equations at contamination rate `p`, expected trials scale as
-`(1-p)^-78`. Even at `p=0.21` this is around `10^7`; at `p=0.51` it is
-astronomical. That leaves two realistic directions:
+Dense GF(2) decoding with RANSAC needs a clean sample of `n_obs` equations, so
+the expected trial count is `(1-p)^-n_obs`:
 
-- pay validation bits so errors become erasures, or
-- deliberately use a sparse structured code and decode with BP / bit flipping.
+| p | clean sample | expected trials |
+|---|---|---|
+| 0.05 | 78 | 55 |
+| 0.10 | 78 | 3.7e3 |
+| 0.21 | 78 | 9.7e7 |
+| 0.30 | 78 | 1.2e12 |
+| 0.51 | 78 | 1.5e24 |
 
-The current `coded-soft(BOUND)` row uses BSC capacity × 0.85 only as an
-optimistic lower bound. Dense random equations with noise are LPN and do not
-come with an efficient decoder. The bound is there to show where a sparse code
-would need to land, not to claim an implementation already exists.
+Glyphmark's published anchor table gives region-change rates of 0.21 at 40-char
+windows under 20% deletion and 0.51 at 100-char windows. Both are already out
+of reach. **Validation bits or sparse soft decoding are mandatory; there is no
+third option.** This closes one of the four alternatives listed in the
+project's own draft.
+
+### 9.3 The soft path and its cliff
+
+Dropping the per-block MAC entirely and treating misaddressing as BSC noise is
+much cheaper when the document is clean, because the anchor test alone
+suppresses misaddressing by a factor `D`. It is also the path that breaks
+first. At `sigma=0.5, k_id=48`:
+
+| q | foreign chars | soft chars | p | validated chars |
+|---|---|---|---|---|
+| 0.95 | 0 | 196 | 0.001 | 700 |
+| 0.95 | 2 000 | 384 | 0.178 | 700 |
+| 0.8 | 0 | 240 | 0.006 | 840 |
+| 0.8 | 4 000 | 571 | 0.235 | 840 |
+| 0.4 | 4 000 | 1 170 | 0.241 | 1 780 |
+
+The soft path stays cheaper in *characters* across this range, but it needs far
+more anchor *sites*, and its failure mode is a cliff rather than a slope.
+Glyphmark's word-safe mode emits on the order of four invisible characters per
+visible word, so a document carrying both marks is a realistic 4 000-foreign-
+character case, not a synthetic one. That is a real experiment: mark a document
+with Glyphmark, then with ours, and decode. It uses a real artefact instead of
+an attack we designed for ourselves to beat.
+
+A cheap engineering answer worth testing: draw carriers from a class disjoint
+from what other tools use (invisible operators U+2061–U+2064 rather than
+ZWNJ/ZWJ). It defeats incidental contamination completely and a targeted
+stripper not at all.
 
 ---
 
@@ -365,6 +417,7 @@ Stated so they can be attacked rather than discovered by a reviewer.
    construction. Write that contribution statement now, while it is cheap.
 5. Either way, report the boundary rather than a winner.
 
+
 ---
 
 ## 13. The result that most threatens the project
@@ -407,6 +460,7 @@ U+200B on paste), which is a strong hint that partial, code-point-selective
 loss is real rather than hypothetical. If it only ever strips *all* carriers of
 a class, that is block loss and the project is in trouble. If it strips some,
 the project stands.
+
 
 ---
 
@@ -471,22 +525,8 @@ Coset enumeration still works: `2^d` candidates each cost one signature
 verification at roughly 50 microseconds, so `d=20` is about a minute. Roster
 mode does not, since the verifier does not know the recipient set.
 
-**This is a candidate construction to evaluate, not a settled answer.** Two
-cryptographic questions remain in addition to the channel measurements:
-
-1. **Cover-text binding / rebinding.** If the signature authenticates only the
-   recovered metadata, a party that learns one valid signed payload may be able
-   to re-encode that same payload into unrelated visible text because anchors,
-   coefficients and checksums are keyless. A production public-verification
-   design therefore needs a precise statement of what the signature signs and
-   how that statement binds to the source document while still permitting
-   fragment verification.
-2. **Verifier key discovery.** A 32-bit `key_id` is only useful if the verifier
-   already has, or can securely resolve, the corresponding Ed25519 public key.
-   That trust/discovery mechanism is external to the current model and must not
-   be hidden behind the phrase “no shared database.”
-
-C7 stays open until (a) those two issues are specified, (b) an end-to-end
-verifier exists, and (c) the harness confirms that keyless addressing does not
-degrade `q` or the collision rate relative to the keyed version. The last point
-should not change canonicalisation, but that remains an empirical check.
+**This is a construction to evaluate, not a settled answer.** C7 stays open
+until someone has written the verifier and confirmed that keyless addressing
+does not degrade `q` or the collision rate relative to the keyed version — it
+should not, since the key never entered the canonicalisation, but that is an
+assumption and the harness can check it in an afternoon.
